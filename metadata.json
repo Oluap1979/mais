@@ -1,0 +1,6 @@
+{
+  "name": "Mais Igreja",
+  "description": "Sistema moderno de gestão eclesiástica para pastores e líderes comunitários. Gerencie membros, células, secretaria e finanças em uma interface intuitiva.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
