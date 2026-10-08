@@ -701,29 +701,51 @@ export const db = {
 
     if (client) {
       try {
-        const payload: any = {
-          titulo: doc.titulo || 'Novo Documento',
-          conteudo: doc.conteudo || '',
-          tipo: doc.tipo || 'Ata de Reunião',
-        };
-        if (authUserId) {
-          payload.user_id = authUserId;
+        if (doc.id && isValidUUID(doc.id)) {
+          const { data, error } = await client
+            .from('secretaria')
+            .update({
+              titulo: doc.titulo || 'Novo Documento',
+              conteudo: doc.conteudo || '',
+              tipo: doc.tipo || 'Ata de Reunião',
+            })
+            .eq('id', doc.id)
+            .select()
+            .single();
+
+          if (!error && data) return data as DocumentoSecretaria;
+          if (error) console.error('Erro ao atualizar secretaria no Supabase:', error);
+        } else {
+          const payload: any = {
+            titulo: doc.titulo || 'Novo Documento',
+            conteudo: doc.conteudo || '',
+            tipo: doc.tipo || 'Ata de Reunião',
+          };
+          if (authUserId) {
+            payload.user_id = authUserId;
+          }
+
+          const { data, error } = await client
+            .from('secretaria')
+            .insert(payload)
+            .select()
+            .single();
+
+          if (!error && data) return data as DocumentoSecretaria;
+          if (error) console.error('Erro ao salvar secretaria no Supabase:', error);
         }
-
-        const { data, error } = await client
-          .from('secretaria')
-          .insert(payload)
-          .select()
-          .single();
-
-        if (!error && data) return data as DocumentoSecretaria;
-        if (error) console.error('Erro ao salvar secretaria no Supabase:', error);
       } catch (err) {
         console.warn('Falha ao salvar secretaria no Supabase:', err);
       }
     }
 
     const docs = await this.getSecretaria();
+    if (doc.id) {
+      const updated = docs.map((d) => (d.id === doc.id ? ({ ...d, ...doc } as DocumentoSecretaria) : d));
+      localStorage.setItem(STORAGE_KEYS.SECRETARIA, JSON.stringify(updated));
+      return { ...doc } as DocumentoSecretaria;
+    }
+
     const novo: DocumentoSecretaria = {
       id: generateUUID(),
       user_id: authUserId || generateUUID(),

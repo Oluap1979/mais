@@ -1,14 +1,27 @@
 import React, { useState } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
+import { Card, CardTitle } from './ui/card';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Select } from './ui/select';
 import { Button } from './ui/button';
-import { Plus, Briefcase, FileText, Award, Scroll, Printer, Trash2, Search, Eye } from 'lucide-react';
+import {
+  Plus,
+  FileText,
+  Award,
+  Scroll,
+  Printer,
+  Trash2,
+  Search,
+  Eye,
+  SlidersHorizontal,
+  Sparkles,
+  BookOpen,
+} from 'lucide-react';
 import { formatDate } from '../lib/utils';
 import { useToast } from './ui/toast';
 import { DocumentoOficial } from './DocumentoOficial';
+import { ConfigCabecalhoModal } from './ConfigCabecalhoModal';
 import type { DocumentoSecretaria, UserSession } from '../types/database';
 
 interface SecretariaViewProps {
@@ -27,65 +40,78 @@ export function SecretariaView({
   const { toastSuccess, toastError } = useToast();
 
   const [isOpenModal, setIsOpenModal] = useState(false);
+  const [isOpenConfigModal, setIsOpenConfigModal] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocumentoSecretaria | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Form states
   const [titulo, setTitulo] = useState('');
-  const [tipo, setTipo] = useState('Ata de Reunião');
+  const [tipo, setTipo] = useState('Carta de Recomendação');
   const [conteudo, setConteudo] = useState('');
   const [search, setSearch] = useState('');
   const [filterTipo, setFilterTipo] = useState('all');
   const [errors, setErrors] = useState<{ titulo?: string; conteudo?: string }>({});
 
   const tiposDisponiveis = [
-    'Ata de Reunião',
-    'Certificado de Batismo',
     'Carta de Recomendação',
+    'Certificado de Batismo',
     'Certificado de Apresentação',
+    'Declaração de Membro',
+    'Certificado de Consagração',
+    'Ata de Reunião',
     'Edital Eclesiástico',
     'Ofício Administrativo',
   ];
 
   const handleOpenNew = () => {
     setTitulo('');
-    setTipo('Ata de Reunião');
-    setConteudo('');
+    setTipo('Carta de Recomendação');
+    handleApplyTemplate('Carta de Recomendação');
     setErrors({});
     setIsOpenModal(true);
   };
 
   const handleApplyTemplate = (tipoSelecionado: string) => {
     setTipo(tipoSelecionado);
-    if (tipoSelecionado === 'Ata de Reunião') {
-      setTitulo('Ata da Reunião Ministerial Ordinária');
+    if (tipoSelecionado === 'Carta de Recomendação') {
+      setTitulo('Carta Pastoral de Recomendação e Mudança');
       setConteudo(
-        'Aos [DATA], reuniram-se na sede da igreja os membros da liderança pastoral para deliberações sobre o avanço dos ministérios, aprovação de contas e planejamento dos eventos do Reino de Deus. Todos os pontos de pauta foram aprovados por unanimidade em espírito de comunhão e oração.'
+        'Por meio desta, temos a honra e o grato dever cristão de recomendar à vossa fraterna comunhão o(a) estimado(a) irmão(ã) [NOME DO MEMBRO], portador(a) do RG [NÚMERO], membro em plena comunhão bíblica e comungante com esta Igreja local.\n\nDurante todo o período em que conviveu sob os nossos cuidados pastorais, deu testemunho de conduta cristã exemplar, irrepreensível e ilibada, participando ativamente dos santos cultos e trabalhos do Reino de Deus.\n\nSolicitamos que o(a) acolhais no Senhor com o mesmo amor fraternal com que sempre o(a) tivemos em nosso meio, concedendo-lhe todo o apoio e assistência espiritual necessária.'
       );
     } else if (tipoSelecionado === 'Certificado de Batismo') {
       setTitulo('Certificado de Batismo nas Águas');
       setConteudo(
-        'Certificamos para os devidos fins que o(a) amado(a) irmão(ã) [NOME DO MEMBRO], tendo professado publicamente a sua fé no Senhor Jesus Cristo, desceu às águas batismais em conformidade com a ordenança apostólica do Evangelho de Mateus 28:19.'
-      );
-    } else if (tipoSelecionado === 'Carta de Recomendação') {
-      setTitulo('Carta Pastoral de Recomendação e Mudança');
-      setConteudo(
-        'Por meio desta, temos a honra de recomendar à vossa amorosa comunhão cristã o(a) estimado(a) irmão(ã) [NOME DO MEMBRO], membro exemplar e comungante desta igreja, que durante o período de convívio conosco testemunhou conduta cristã irrepreensível e fiel serviço no Reino.'
+        'Certificamos para a glória de Deus e para os devidos fins eclesiásticos que o(a) amado(a) irmão(ã) [NOME DO BATIZANDO], tendo professado voluntária e publicamente a sua fé no Senhor e Salvador Jesus Cristo, foi solenemente batizado(a) nas águas em conformidade com o mandamento bíblico e apostólico expresso no Santo Evangelho.'
       );
     } else if (tipoSelecionado === 'Certificado de Apresentação') {
-      setTitulo('Certificado de Apresentação de Criança');
+      setTitulo('Certificado de Apresentação ao Senhor');
       setConteudo(
-        'Certificamos que a criança [NOME DA CRIANÇA], filha de [NOME DOS PAIS], foi solenemente apresentada ao Senhor Jesus Cristo no templo desta igreja, recebendo a oração e bênção pastoral conforme as Sagradas Escrituras.'
+        'Certificamos que a criança [NOME DA CRIANÇA], nascida em [DATA DE NASCIMENTO], filha dos amados irmãos [NOME DO PAI] e [NOME DA MÃE], foi solenemente apresentada ao Senhor Jesus Cristo no templo sede desta Igreja, recebendo a santa oração intercessória e a bênção do Ministério Pastoral com a imposição de mãos.'
+      );
+    } else if (tipoSelecionado === 'Declaração de Membro') {
+      setTitulo('Declaração de Membro em Plena Comunhão');
+      setConteudo(
+        'Declaramos para os devidos fins a quem interessar possa que o(a) senhor(a) [NOME DO MEMBRO], inscrito(a) no CPF sob o nº [000.000.000-00], é membro ativo e comungante desta Igreja, achando-se no pleno gozo de seus direitos e deveres espirituais e eclesiásticos, sem nada que desabone sua conduta moral e cristã.'
+      );
+    } else if (tipoSelecionado === 'Certificado de Consagração') {
+      setTitulo('Certificado de Consagração Ministerial');
+      setConteudo(
+        'A Diretoria e o Ministério Pastoral desta Igreja certificam que o(a) amado(a) irmão(ã) [NOME DO OBREIRO], tendo dado provas de piedade, dedicação e vocação pelo Espírito Santo, foi solenemente consagrado(a) e empossado(a) ao nobre cargo de [DIÁCONO / PRESBÍTERO / EVANGELISTA / MISSIONÁRIO], com unção e imposição de mãos da liderança da Igreja.'
+      );
+    } else if (tipoSelecionado === 'Ata de Reunião') {
+      setTitulo('Ata da Reunião Ministerial Ordinária');
+      setConteudo(
+        'Aos [DATA], às [HORÁRIO], reuniram-se na sede da congregação os membros da diretoria e liderança pastoral desta Igreja, sob a presidência do Pastor Titular, a fim de tratar dos seguintes assuntos: 1) Prestação de contas financeiras do mês anterior; 2) Planejamento das campanhas evangelísticas e cultos comemorativos; 3) Assuntos gerais do rebanho. Após exposição e discussão fraterna, todos os pontos de pauta foram aprovados por unânime deliberação.'
       );
     } else if (tipoSelecionado === 'Edital Eclesiástico') {
-      setTitulo('Edital de Convocação Eclesiástica');
+      setTitulo('Edital de Convocação de Assembleia Geral');
       setConteudo(
-        'Convocamos todos os membros em comunhão desta congregação para a Assembleia Geral Eclesiástica Ordinária, a realizar-se no templo sede no dia [DATA], às [HORÁRIO], a fim de deliberar sobre assuntos de interesse da comunidade.'
+        'Pelo presente Edital, o Pastor Presidente desta Igreja, no uso de suas atribuições eclesiásticas e estatutárias, convoca todos os membros em plena comunhão para a Assembleia Geral Ordinária, a realizar-se no templo sede no dia [DATA], às [HORÁRIO], a fim de deliberar sobre a aprovação das contas anuais e eleição da nova diretoria para o próximo biênio.'
       );
     } else if (tipoSelecionado === 'Ofício Administrativo') {
       setTitulo('Ofício Pastoral Administrativo');
       setConteudo(
-        'Cumprimentando-o(a) cordialmente com a graça e a paz de nosso Senhor Jesus Cristo, servimo-nos do presente ofício para comunicar formalmente [ASSUNTO OU SOLICITAÇÃO], colocando-nos à disposição em espírito fraterno.'
+        'Cumprimentando-vos mui cordialmente com a graça e a paz de nosso Senhor e Salvador Jesus Cristo, servimo-nos do presente ofício para comunicar respeitosamente a esta nobre instituição [ASSUNTO / COMUNICADO OFICIAL], colocando-nos à inteira disposição para o que for necessário ao bom andamento dos trabalhos cristãos.'
       );
     }
   };
@@ -101,7 +127,7 @@ export function SecretariaView({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) {
-      toastError('❌ Erro. Tente novamente.');
+      toastError('Preencha os campos obrigatórios.');
       return;
     }
 
@@ -111,10 +137,10 @@ export function SecretariaView({
         tipo,
         conteudo,
       });
-      toastSuccess('✅ Sucesso! Operação realizada.');
+      toastSuccess('Documento oficial registrado com sucesso!');
       setIsOpenModal(false);
     } catch {
-      toastError('❌ Erro. Tente novamente.');
+      toastError('Erro ao registrar documento.');
     }
   };
 
@@ -123,9 +149,33 @@ export function SecretariaView({
       await onDeleteDocumento(id);
       setDeleteConfirmId(null);
       if (selectedDoc?.id === id) setSelectedDoc(null);
-      toastSuccess('✅ Sucesso! Operação realizada.');
+      toastSuccess('Documento removido com sucesso.');
     } catch {
-      toastError('❌ Erro. Tente novamente.');
+      toastError('Erro ao remover documento.');
+    }
+  };
+
+  const handleUpdateConteudoViewer = async (novoConteudo: string, novoTitulo?: string) => {
+    if (!selectedDoc) return;
+    try {
+      await onSaveDocumento({
+        id: selectedDoc.id,
+        titulo: novoTitulo || selectedDoc.titulo,
+        conteudo: novoConteudo,
+        tipo: selectedDoc.tipo,
+      });
+      setSelectedDoc((prev) =>
+        prev
+          ? {
+              ...prev,
+              titulo: novoTitulo || prev.titulo,
+              conteudo: novoConteudo,
+            }
+          : null
+      );
+      toastSuccess('Alterações salvas no documento!');
+    } catch {
+      toastError('Erro ao salvar alterações no documento.');
     }
   };
 
@@ -139,21 +189,64 @@ export function SecretariaView({
 
   return (
     <div className="space-y-6">
-      {/* Top Header */}
+      {/* Top Header com Ações Rápidas */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Secretaria & Arquivo Histórico</h2>
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+            <span>Secretaria & Chancelaria Eclesiástica</span>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 font-semibold border border-blue-200">
+              A4 Profissional
+            </span>
+          </h2>
           <p className="text-xs text-gray-500 mt-0.5">
-            Registro oficial de atas, certificados eclesiásticos e cartas de recomendação
+            Emissão de certificados, cartas pastorais, atas e ofícios com cabeçalho timbrado personalizável para qualquer igreja
           </p>
         </div>
 
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsOpenConfigModal(true)}
+            className="inline-flex items-center justify-center gap-2 bg-white text-gray-700 border border-gray-300 px-3.5 py-2 rounded-lg hover:bg-gray-50 transition-colors text-xs font-semibold shadow-xs cursor-pointer active:scale-95"
+            title="Personalizar Cabeçalho, CNPJ, Endereço e Link da Logo"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5 text-blue-600" />
+            <span>Configurar Cabeçalho & Logo</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleOpenNew}
+            className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-xs font-bold shadow-xs cursor-pointer active:scale-95"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Novo Documento</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Banner de Ajuda do Cabeçalho Timbrado */}
+      <div className="p-3.5 rounded-xl bg-linear-to-r from-blue-50 via-indigo-50 to-amber-50 border border-blue-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-lg bg-blue-600 text-white shrink-0">
+            <Sparkles className="h-4 w-4" />
+          </div>
+          <div>
+            <span className="font-bold text-blue-950 block">
+              Cabeçalho Timbrado Multi-Igrejas com Logo por Link
+            </span>
+            <span className="text-blue-800 text-[11px]">
+              Insira o nome da sua igreja, CNPJ, endereço completo e o link da sua logo. Todos os certificados e documentos saem no formato oficial A4 prontos para impressão ou PDF.
+            </span>
+          </div>
+        </div>
+
         <button
-          onClick={handleOpenNew}
-          className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-semibold shadow-xs cursor-pointer active:bg-blue-800"
+          type="button"
+          onClick={() => setIsOpenConfigModal(true)}
+          className="shrink-0 text-xs font-bold text-blue-700 hover:text-blue-900 bg-white/80 hover:bg-white border border-blue-200 px-3 py-1.5 rounded-lg shadow-xs cursor-pointer"
         >
-          <Plus className="h-4 w-4" />
-          <span>Novo Documento</span>
+          Editar Cabeçalho da Minha Igreja &rarr;
         </button>
       </div>
 
@@ -170,13 +263,13 @@ export function SecretariaView({
           />
         </div>
 
-        <div className="w-full sm:w-60">
+        <div className="w-full sm:w-64">
           <Select
             value={filterTipo}
             onChange={(e) => setFilterTipo(e.target.value)}
             className="bg-white"
           >
-            <option value="all">Todos os Documentos</option>
+            <option value="all">Todos os Tipos ({documentos.length})</option>
             {tiposDisponiveis.map((t) => (
               <option key={t} value={t}>
                 {t}
@@ -188,78 +281,107 @@ export function SecretariaView({
 
       {/* Grid de Documentos */}
       {filteredDocs.length === 0 ? (
-        <Card className="p-12 text-center bg-white border border-dashed border-gray-300">
-          <FileText className="h-10 w-10 text-gray-400 mx-auto mb-3" />
-          <h3 className="text-base font-semibold text-gray-900">Nenhum documento registrado</h3>
-          <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
-            Crie atas de assembleia, certidões ou cartas pastorais com modelo oficial.
+        <Card className="p-12 text-center bg-white border border-dashed border-gray-300 rounded-2xl">
+          <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 border border-blue-100">
+            <BookOpen className="h-7 w-7" />
+          </div>
+          <h3 className="text-base font-bold text-gray-900">Nenhum documento encontrado</h3>
+          <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto leading-relaxed">
+            Emita cartas pastorais de recomendação, certificados de batismo com moldura clássica, certidões ou atas de reunião.
           </p>
-          <button
-            onClick={handleOpenNew}
-            className="mt-4 inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-xs font-semibold"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Emitir Primeiro Documento</span>
-          </button>
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <button
+              onClick={handleOpenNew}
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-xs font-bold shadow-xs cursor-pointer"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Emitir Documento Oficial</span>
+            </button>
+            <button
+              onClick={() => setIsOpenConfigModal(true)}
+              className="inline-flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span>Configurar Cabeçalho</span>
+            </button>
+          </div>
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredDocs.map((doc) => (
-            <Card
-              key={doc.id}
-              className="flex flex-col justify-between border border-gray-200 bg-white hover:border-blue-300 transition-all shadow-xs hover:shadow-md rounded-xl overflow-hidden"
-            >
-              <div className="p-5">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
-                    <Scroll className="h-3 w-3" />
-                    <span>{doc.tipo}</span>
+          {filteredDocs.map((doc) => {
+            const isCert =
+              doc.tipo.toLowerCase().includes('batismo') ||
+              doc.tipo.toLowerCase().includes('apresenta') ||
+              doc.tipo.toLowerCase().includes('certificado') ||
+              doc.tipo.toLowerCase().includes('consagra');
+            const isRec = doc.tipo.toLowerCase().includes('recomenda');
+
+            return (
+              <Card
+                key={doc.id}
+                className="flex flex-col justify-between border border-gray-200/90 bg-white hover:border-blue-400 hover:shadow-lg transition-all rounded-2xl overflow-hidden group"
+              >
+                <div className="p-5">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <span
+                      className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border ${
+                        isCert
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : isRec
+                          ? 'bg-blue-50 text-blue-800 border-blue-200'
+                          : 'bg-slate-100 text-slate-800 border-slate-200'
+                      }`}
+                    >
+                      {isCert ? <Award className="h-3 w-3" /> : isRec ? <Scroll className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
+                      <span>{doc.tipo}</span>
+                    </span>
+
+                    <span className="text-[11px] text-gray-400 tabular-nums">
+                      {formatDate(doc.data_criacao)}
+                    </span>
                   </div>
-                  <span className="text-[11px] text-gray-400 tabular-nums">
-                    {formatDate(doc.data_criacao)}
-                  </span>
+
+                  <CardTitle className="text-base font-bold text-gray-900 group-hover:text-blue-700 transition-colors line-clamp-2">
+                    {doc.titulo}
+                  </CardTitle>
+
+                  <p className="text-xs text-gray-600 mt-2.5 line-clamp-3 leading-relaxed">
+                    {doc.conteudo}
+                  </p>
                 </div>
 
-                <CardTitle className="text-base font-bold text-gray-900 line-clamp-2">
-                  {doc.titulo}
-                </CardTitle>
-
-                <p className="text-xs text-gray-600 mt-2.5 line-clamp-3 leading-relaxed">
-                  {doc.conteudo}
-                </p>
-              </div>
-
-              <div className="border-t border-gray-100 bg-gray-50/70 px-5 py-3 flex items-center justify-between">
-                <button
-                  onClick={() => setSelectedDoc(doc)}
-                  className="inline-flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-900 font-semibold cursor-pointer"
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                  <span>Visualizar</span>
-                </button>
-
-                <div className="flex items-center gap-1">
+                <div className="border-t border-gray-100 bg-gray-50/80 px-5 py-3 flex items-center justify-between">
                   <button
-                    onClick={() => {
-                      setSelectedDoc(doc);
-                      setTimeout(() => window.print(), 200);
-                    }}
-                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                    title="Imprimir"
+                    onClick={() => setSelectedDoc(doc)}
+                    className="inline-flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-900 font-bold cursor-pointer"
                   >
-                    <Printer className="h-4 w-4" />
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>Visualizar A4</span>
                   </button>
-                  <button
-                    onClick={() => setDeleteConfirmId(doc.id)}
-                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                    title="Excluir"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        setSelectedDoc(doc);
+                        setTimeout(() => window.print(), 350);
+                      }}
+                      className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                      title="Imprimir / Salvar PDF"
+                    >
+                      <Printer className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirmId(doc.id)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      title="Excluir"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -268,35 +390,30 @@ export function SecretariaView({
         <DialogHeader>
           <DialogTitle>Novo Documento Eclesiástico</DialogTitle>
           <DialogDescription>
-            Escolha um modelo ou elabore um documento personalizado para o arquivo da igreja.
+            Selecione um modelo pastoral pronto ou crie um documento personalizado para o arquivo oficial da igreja.
           </DialogDescription>
         </DialogHeader>
 
         {/* Modelos rápidos */}
         <div className="mb-4">
-          <span className="text-xs text-gray-500 font-medium block mb-1.5">Modelos prontos:</span>
+          <span className="text-xs text-gray-600 font-bold block mb-1.5">
+            Modelos Canônicos Eclesiásticos:
+          </span>
           <div className="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              onClick={() => handleApplyTemplate('Ata de Reunião')}
-              className="text-xs px-2.5 py-1 rounded bg-gray-100 hover:bg-blue-100 hover:text-blue-700 text-gray-700 transition-colors"
-            >
-              Ata de Reunião
-            </button>
-            <button
-              type="button"
-              onClick={() => handleApplyTemplate('Certificado de Batismo')}
-              className="text-xs px-2.5 py-1 rounded bg-gray-100 hover:bg-blue-100 hover:text-blue-700 text-gray-700 transition-colors"
-            >
-              Certificado de Batismo
-            </button>
-            <button
-              type="button"
-              onClick={() => handleApplyTemplate('Carta de Recomendação')}
-              className="text-xs px-2.5 py-1 rounded bg-gray-100 hover:bg-blue-100 hover:text-blue-700 text-gray-700 transition-colors"
-            >
-              Carta de Recomendação
-            </button>
+            {tiposDisponiveis.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => handleApplyTemplate(t)}
+                className={`text-xs px-2.5 py-1 rounded-lg transition-colors cursor-pointer font-medium ${
+                  tipo === t
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-gray-100 hover:bg-blue-100 hover:text-blue-800 text-gray-700'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -305,7 +422,7 @@ export function SecretariaView({
             <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
               Tipo do Documento
             </label>
-            <Select value={tipo} onChange={(e) => setTipo(e.target.value)}>
+            <Select value={tipo} onChange={(e) => handleApplyTemplate(e.target.value)}>
               {tiposDisponiveis.map((t) => (
                 <option key={t} value={t}>
                   {t}
@@ -319,7 +436,7 @@ export function SecretariaView({
               Título Oficial
             </label>
             <Input
-              placeholder="Ex: Ata da 12ª Assembleia Geral Ordinária"
+              placeholder="Ex: Carta Pastoral de Recomendação e Mudança"
               value={titulo}
               onChange={(e) => setTitulo(e.target.value)}
               error={errors.titulo}
@@ -328,14 +445,15 @@ export function SecretariaView({
 
           <div>
             <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-              Texto / Conteúdo
+              Texto / Teor do Documento
             </label>
             <Textarea
               placeholder="Redija o teor completo do documento..."
               value={conteudo}
               onChange={(e) => setConteudo(e.target.value)}
-              rows={6}
+              rows={7}
               error={errors.conteudo}
+              className="font-sans leading-relaxed text-xs"
             />
           </div>
 
@@ -345,13 +463,21 @@ export function SecretariaView({
             </Button>
             <button
               type="submit"
-              className="bg-blue-600 text-white hover:bg-blue-700 px-6 py-2 rounded-md transition-colors font-medium text-sm shadow-xs cursor-pointer active:bg-blue-800"
+              className="bg-blue-600 text-white hover:bg-blue-700 px-6 py-2 rounded-lg transition-colors font-bold text-xs shadow-xs cursor-pointer active:scale-95"
             >
-              Salvar Documento
+              Emitir e Salvar Documento
             </button>
           </DialogFooter>
         </form>
       </Dialog>
+
+      {/* Modal Independente de Configuração do Cabeçalho da Igreja */}
+      <ConfigCabecalhoModal
+        open={isOpenConfigModal}
+        onOpenChange={setIsOpenConfigModal}
+        user={user}
+        onSaveSuccess={() => toastSuccess('Cabeçalho da igreja atualizado com sucesso!')}
+      />
 
       {/* Visualizador & Emissor Profissional de Documento Oficial A4 */}
       {selectedDoc && (
@@ -359,6 +485,7 @@ export function SecretariaView({
           documento={selectedDoc}
           user={user || null}
           onClose={() => setSelectedDoc(null)}
+          onUpdateConteudo={handleUpdateConteudoViewer}
         />
       )}
 
