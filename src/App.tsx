@@ -319,7 +319,11 @@ function MainApp() {
       <SupabaseConfigModal
         open={configModalOpen}
         onOpenChange={setConfigModalOpen}
-        onDataUpdated={loadData}
+        onDataUpdated={() => {
+          const freshUser = db.getUser();
+          if (freshUser) setUser(freshUser);
+          loadData();
+        }}
       />
     </div>
   );

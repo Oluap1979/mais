@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Users, Group, Briefcase, DollarSign, Church, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Group, Briefcase, DollarSign, Church, LogOut, Settings } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { UserSession } from '../types/database';
 
@@ -20,6 +20,7 @@ export function Sidebar({
   onNavigate,
   user,
   onLogout,
+  onOpenConfig,
   isMobile = false,
   onCloseMobile,
 }: SidebarProps) {
@@ -94,6 +95,19 @@ export function Sidebar({
         )}
 
         <div className="flex flex-col gap-1">
+          {onOpenConfig && (
+            <button
+              onClick={() => {
+                onOpenConfig();
+                if (isMobile && onCloseMobile) onCloseMobile();
+              }}
+              className="flex items-center gap-2.5 px-2.5 py-2 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-md transition-colors w-full cursor-pointer"
+            >
+              <Settings className="h-3.5 w-3.5 text-blue-400" />
+              <span>Configurações</span>
+            </button>
+          )}
+
           <button
             onClick={onLogout}
             className="flex items-center gap-2.5 px-2.5 py-2 text-xs font-medium text-slate-400 hover:text-rose-300 hover:bg-rose-950/30 rounded-md transition-colors w-full cursor-pointer"

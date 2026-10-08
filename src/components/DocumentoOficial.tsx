@@ -43,6 +43,10 @@ export function DocumentoOficial({
     getSavedHeaderConfig(user?.igreja, user?.nome, user?.cargo)
   );
 
+  useEffect(() => {
+    setConfig(getSavedHeaderConfig(user?.igreja, user?.nome, user?.cargo));
+  }, [user, documento]);
+
   const [activeTab, setActiveTab] = useState<'igreja' | 'logo' | 'lideranca' | 'estilo' | 'conteudo'>('igreja');
   const [isEditingPanel, setIsEditingPanel] = useState(false);
   const [hasSavedSuccess, setHasSavedSuccess] = useState(false);
@@ -844,9 +848,12 @@ export function DocumentoOficial({
                 {config.logoUrl && logoLoadStatus === 'success' ? (
                   <img
                     src={config.logoUrl}
-                    alt="Logo Oficial"
+                    alt={`Logo Oficial - ${config.nomeIgreja}`}
                     style={{ height: `${config.logoHeight}px` }}
                     className="max-w-[220px] object-contain drop-shadow-sm"
+                    crossOrigin="anonymous"
+                    referrerPolicy="no-referrer"
+                    loading="eager"
                   />
                 ) : (
                   renderBrasaoVetorial(config.logoHeight)
@@ -866,9 +873,18 @@ export function DocumentoOficial({
                 </p>
               )}
 
-              <p className="text-[10px] tracking-widest uppercase text-slate-500 font-medium">
-                {config.subtitulo} &bull; {config.cidadeEstado}
+              <p className="text-[10px] tracking-widest uppercase text-slate-600 font-medium mt-0.5">
+                {config.subtitulo}
               </p>
+
+              {config.endereco && (
+                <p className="text-[9.5px] tracking-wide text-slate-500 font-medium mt-0.5">
+                  {config.endereco}
+                  {config.bairro ? ` • ${config.bairro}` : ''}
+                  {config.cidadeEstado ? ` • ${config.cidadeEstado}` : ''}
+                  {config.cep ? ` • CEP: ${config.cep}` : ''}
+                </p>
+              )}
 
               {/* Filete ornamental com losango central */}
               <div className="flex items-center justify-center gap-3 my-4">
@@ -975,9 +991,12 @@ export function DocumentoOficial({
                     {config.logoUrl && logoLoadStatus === 'success' ? (
                       <img
                         src={config.logoUrl}
-                        alt="Logo Oficial"
+                        alt={`Logo Oficial - ${config.nomeIgreja}`}
                         style={{ height: `${config.logoHeight}px` }}
                         className="max-w-[240px] object-contain drop-shadow-xs"
+                        crossOrigin="anonymous"
+                        referrerPolicy="no-referrer"
+                        loading="eager"
                       />
                     ) : (
                       renderBrasaoVetorial(config.logoHeight)
@@ -988,42 +1007,54 @@ export function DocumentoOficial({
                     {config.nomeIgreja}
                   </h1>
 
+                  {config.subtitulo && (
+                    <p className="text-xs uppercase tracking-wider text-slate-700 font-semibold mt-0.5">
+                      {config.subtitulo}
+                    </p>
+                  )}
+
                   {config.denominacao && (
-                    <p className="text-[11px] uppercase tracking-widest text-slate-600 font-medium mt-0.5">
+                    <p className="text-[10.5px] uppercase tracking-widest text-slate-600 font-medium mt-0.5">
                       {config.denominacao}
                     </p>
                   )}
 
-                  <p className="text-[10px] uppercase tracking-wider text-slate-500 mt-1">
-                    {config.endereco} &bull; {config.cidadeEstado} &bull; CEP {config.cep}
+                  <p className="text-[10px] uppercase tracking-wider text-slate-600 mt-1 font-medium">
+                    {config.endereco}
+                    {config.bairro ? ` • ${config.bairro}` : ''}
+                    {config.cidadeEstado ? ` • ${config.cidadeEstado}` : ''}
+                    {config.cep ? ` • CEP ${config.cep}` : ''}
                   </p>
 
-                  <p className="text-[10px] text-slate-500">
-                    {config.cnpj && `CNPJ: ${config.cnpj} • `} Tel: {config.telefone} &bull; {config.email}
+                  <p className="text-[9.5px] text-slate-500 mt-0.5">
+                    {config.cnpj ? `CNPJ: ${config.cnpj} • ` : ''}Tel: {config.telefone} &bull; {config.email}
                   </p>
                 </header>
               ) : (
                 /* Estilo Moderno Executivo (Padrão) */
                 <header className="border-b-2 pb-5 mb-8" style={{ borderColor: colors.primary }}>
                   <div className="flex items-start justify-between gap-4">
-                    {/* Lado Esquerdo: Logo + Identificação */}
+                    {/* Lado Esquerdo: Logo + Identificação da Igreja */}
                     <div className="flex items-center gap-4">
                       {config.logoUrl && logoLoadStatus === 'success' ? (
                         <img
                           src={config.logoUrl}
-                          alt="Logo da Igreja"
-                          style={{ height: `${config.logoHeight}px` }}
+                          alt={`Logo - ${config.nomeIgreja}`}
+                          style={{ height: `${config.logoHeight}px`, maxHeight: '85px' }}
                           className="max-w-[180px] object-contain shrink-0 drop-shadow-xs"
+                          crossOrigin="anonymous"
+                          referrerPolicy="no-referrer"
+                          loading="eager"
                         />
                       ) : (
                         renderBrasaoVetorial(config.logoHeight)
                       )}
 
-                      <div>
-                        <h1 className="text-lg sm:text-xl font-bold uppercase tracking-wider leading-tight" style={{ color: colors.primary }}>
+                      <div className="flex flex-col justify-center">
+                        <h1 className="text-lg sm:text-xl font-bold uppercase tracking-wider leading-tight text-slate-950" style={{ color: colors.primary }}>
                           {config.nomeIgreja}
                         </h1>
-                        <p className="text-[11px] uppercase tracking-wider text-slate-600 font-semibold mt-0.5">
+                        <p className="text-[11px] uppercase tracking-wider text-slate-700 font-semibold mt-0.5">
                           {config.subtitulo}
                         </p>
                         {config.denominacao && (
@@ -1031,11 +1062,14 @@ export function DocumentoOficial({
                             {config.denominacao}
                           </p>
                         )}
-                        <p className="text-[10px] text-slate-600 mt-1">
-                          {config.endereco} &bull; {config.cidadeEstado}
+                        <p className="text-[10px] text-slate-600 font-medium mt-1 leading-snug">
+                          {config.endereco}
+                          {config.bairro ? ` • ${config.bairro}` : ''}
+                          {config.cidadeEstado ? ` • ${config.cidadeEstado}` : ''}
+                          {config.cep ? ` • CEP: ${config.cep}` : ''}
                         </p>
-                        <p className="text-[9px] text-slate-500">
-                          {config.cnpj && `CNPJ: ${config.cnpj} • `} Contato: {config.telefone} &bull; {config.email}
+                        <p className="text-[9px] text-slate-500 mt-0.5">
+                          {config.cnpj ? `CNPJ: ${config.cnpj} • ` : ''}Contato: {config.telefone} &bull; {config.email}
                         </p>
                       </div>
                     </div>

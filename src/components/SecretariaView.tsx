@@ -17,11 +17,13 @@ import {
   SlidersHorizontal,
   Sparkles,
   BookOpen,
+  Church,
 } from 'lucide-react';
 import { formatDate } from '../lib/utils';
 import { useToast } from './ui/toast';
 import { DocumentoOficial } from './DocumentoOficial';
 import { ConfigCabecalhoModal } from './ConfigCabecalhoModal';
+import { getSavedHeaderConfig, type IgrejaHeaderConfig } from '../types/documentoConfig';
 import type { DocumentoSecretaria, UserSession } from '../types/database';
 
 interface SecretariaViewProps {
@@ -43,6 +45,9 @@ export function SecretariaView({
   const [isOpenConfigModal, setIsOpenConfigModal] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocumentoSecretaria | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [headerConfig, setHeaderConfig] = useState<IgrejaHeaderConfig>(() =>
+    getSavedHeaderConfig(user?.igreja, user?.nome, user?.cargo)
+  );
 
   // Form states
   const [titulo, setTitulo] = useState('');
@@ -225,28 +230,51 @@ export function SecretariaView({
         </div>
       </div>
 
-      {/* Banner de Ajuda do Cabeçalho Timbrado */}
-      <div className="p-3.5 rounded-xl bg-linear-to-r from-blue-50 via-indigo-50 to-amber-50 border border-blue-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-lg bg-blue-600 text-white shrink-0">
-            <Sparkles className="h-4 w-4" />
+      {/* Barra de Status e Identidade da Igreja para Impressão */}
+      <div className="p-4 rounded-xl bg-white border border-gray-200 shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0 overflow-hidden">
+            {headerConfig.logoUrl ? (
+              <img
+                src={headerConfig.logoUrl}
+                alt={headerConfig.nomeIgreja}
+                className="w-full h-full object-contain p-1"
+                crossOrigin="anonymous"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+            ) : (
+              <Church className="w-5 h-5 text-blue-600" />
+            )}
           </div>
+
           <div>
-            <span className="font-bold text-blue-950 block">
-              Cabeçalho Timbrado Multi-Igrejas com Logo por Link
-            </span>
-            <span className="text-blue-800 text-[11px]">
-              Insira o nome da sua igreja, CNPJ, endereço completo e o link da sua logo. Todos os certificados e documentos saem no formato oficial A4 prontos para impressão ou PDF.
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-gray-900 text-sm">
+                {headerConfig.nomeIgreja}
+              </span>
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                Cabeçalho A4 Ativo
+              </span>
+            </div>
+            <p className="text-gray-500 text-xs mt-0.5 truncate max-w-xl">
+              {headerConfig.endereco || 'Endereço da igreja não configurado'}
+              {headerConfig.bairro ? ` • ${headerConfig.bairro}` : ''}
+              {headerConfig.cidadeEstado ? ` • ${headerConfig.cidadeEstado}` : ''}
+              {headerConfig.cnpj ? ` • CNPJ: ${headerConfig.cnpj}` : ''}
+            </p>
           </div>
         </div>
 
         <button
           type="button"
           onClick={() => setIsOpenConfigModal(true)}
-          className="shrink-0 text-xs font-bold text-blue-700 hover:text-blue-900 bg-white/80 hover:bg-white border border-blue-200 px-3 py-1.5 rounded-lg shadow-xs cursor-pointer"
+          className="shrink-0 text-xs font-semibold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
         >
-          Editar Cabeçalho da Minha Igreja &rarr;
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          <span>Editar Logo & Dados da Igreja</span>
         </button>
       </div>
 
@@ -474,9 +502,17 @@ export function SecretariaView({
       {/* Modal Independente de Configuração do Cabeçalho da Igreja */}
       <ConfigCabecalhoModal
         open={isOpenConfigModal}
-        onOpenChange={setIsOpenConfigModal}
+        onOpenChange={(open) => {
+          setIsOpenConfigModal(open);
+          if (!open) {
+            setHeaderConfig(getSavedHeaderConfig(user?.igreja, user?.nome, user?.cargo));
+          }
+        }}
         user={user}
-        onSaveSuccess={() => toastSuccess('Cabeçalho da igreja atualizado com sucesso!')}
+        onSaveSuccess={() => {
+          setHeaderConfig(getSavedHeaderConfig(user?.igreja, user?.nome, user?.cargo));
+          toastSuccess('Cabeçalho da igreja atualizado com sucesso!');
+        }}
       />
 
       {/* Visualizador & Emissor Profissional de Documento Oficial A4 */}

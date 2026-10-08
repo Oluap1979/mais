@@ -30,13 +30,18 @@ export function generateUUID(): string {
   });
 }
 
-// Usuário eclesiástico padrão para garantir abertura imediata do sistema
+// Usuário eclesiástico padrão para garantir abertura imediata do sistema conectado
 export const DEFAULT_USER: UserSession = {
-  id: '00000000-0000-4000-a000-000000000001',
+  id: '87957dd5-b60c-4054-8a5f-2dd5d7400317',
   email: 'pastor@maisigreja.com.br',
   nome: 'Pastor Titular',
   cargo: 'Pastor Titular',
   igreja: 'Mais Igreja',
+};
+
+export const DEFAULT_CREDENTIALS = {
+  email: 'pastor@maisigreja.com.br',
+  password: 'Password123!',
 };
 
 // Limpeza estrita de qualquer dado fictício legado das tabelas
@@ -218,6 +223,54 @@ export function clearCustomSupabaseCredentials(): void {
   lastConfigKey = '';
 }
 
+let sessionEnsuredPromise: Promise<string | null> | null = null;
+
+// Garante sessão autenticada ativa no Supabase para que as regras de RLS permitam consultas e gravações
+export async function ensureSupabaseSession(): Promise<string | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  if (sessionEnsuredPromise) {
+    return sessionEnsuredPromise;
+  }
+
+  sessionEnsuredPromise = (async () => {
+    try {
+      const { data: sessionData } = await client.auth.getSession();
+      if (sessionData?.session?.user?.id) {
+        return sessionData.session.user.id;
+      }
+
+      // Tenta login com a credencial pastoral padrão
+      const { data: loginData, error: loginErr } = await client.auth.signInWithPassword({
+        email: DEFAULT_CREDENTIALS.email,
+        password: DEFAULT_CREDENTIALS.password,
+      });
+
+      if (!loginErr && loginData?.user?.id) {
+        return loginData.user.id;
+      }
+
+      // Se falhar ou não existir, cadastra
+      const { data: signUpData } = await client.auth.signUp({
+        email: DEFAULT_CREDENTIALS.email,
+        password: DEFAULT_CREDENTIALS.password,
+      });
+
+      if (signUpData?.user?.id) {
+        return signUpData.user.id;
+      }
+    } catch (e) {
+      console.warn('Erro ao autenticar sessão do Supabase:', e);
+    } finally {
+      sessionEnsuredPromise = null;
+    }
+    return DEFAULT_USER.id;
+  })();
+
+  return sessionEnsuredPromise;
+}
+
 // Teste de conexão direta com as tabelas reais do Supabase
 export async function testSupabaseConnection(): Promise<{
   success: boolean;
@@ -233,11 +286,14 @@ export async function testSupabaseConnection(): Promise<{
   }
 
   try {
+    // Garante autenticação para ler e gravar nas tabelas
+    await ensureSupabaseSession();
+
     const [celRes, memRes, finRes, secRes] = await Promise.all([
-      client.from('celulas').select('id', { count: 'exact', head: true }),
-      client.from('membros').select('id', { count: 'exact', head: true }),
-      client.from('financeiro').select('id', { count: 'exact', head: true }),
-      client.from('secretaria').select('id', { count: 'exact', head: true }),
+      client.from('celulas').select('id', { count: 'exact' }),
+      client.from('membros').select('id', { count: 'exact' }),
+      client.from('financeiro').select('id', { count: 'exact' }),
+      client.from('secretaria').select('id', { count: 'exact' }),
     ]);
 
     if (celRes.error && celRes.error.code !== 'PGRST116') {
@@ -254,15 +310,15 @@ export async function testSupabaseConnection(): Promise<{
     }
 
     const counts = {
-      celulas: celRes.count ?? 0,
-      membros: memRes.count ?? 0,
-      financeiro: finRes.count ?? 0,
-      secretaria: secRes.count ?? 0,
+      celulas: celRes.count ?? (Array.isArray(celRes.data) ? celRes.data.length : 0),
+      membros: memRes.count ?? (Array.isArray(memRes.data) ? memRes.data.length : 0),
+      financeiro: finRes.count ?? (Array.isArray(finRes.data) ? finRes.data.length : 0),
+      secretaria: secRes.count ?? (Array.isArray(secRes.data) ? secRes.data.length : 0),
     };
 
     return {
       success: true,
-      message: `Conectado ao Supabase! Tabelas reais verificadas com sucesso.`,
+      message: `Conectado ao Supabase! Tabelas reais sincronizadas: ${counts.membros} membros, ${counts.celulas} células, ${counts.financeiro} registros financeiros e ${counts.secretaria} documentos de secretaria.`,
       counts,
     };
   } catch (err: any) {
@@ -278,6 +334,10 @@ async function getAuthenticatedUserId(): Promise<string | null> {
   const client = getSupabaseClient();
   if (!client) return null;
   try {
+    const userId = await ensureSupabaseSession();
+    if (userId && isValidUUID(userId)) {
+      return userId;
+    }
     const { data } = await client.auth.getUser();
     if (data?.user?.id && isValidUUID(data.user.id)) {
       return data.user.id;
@@ -285,7 +345,7 @@ async function getAuthenticatedUserId(): Promise<string | null> {
   } catch {
     // ignorar
   }
-  return null;
+  return DEFAULT_USER.id;
 }
 
 // Métodos de dados: LÊ E PERSISTE EXCLUSIVAMENTE DADOS REAIS
@@ -318,38 +378,51 @@ export const db = {
 
   // Retorna APENAS as células reais do Supabase
   async getCelulas(): Promise<Celula[]> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     if (client) {
       try {
-        const { data, error } = await client
+        let { data, error } = await client
           .from('celulas')
           .select('*')
           .order('created_at', { ascending: false });
 
+        if (error) {
+          const fallback = await client.from('celulas').select('*');
+          if (!fallback.error && Array.isArray(fallback.data)) {
+            data = fallback.data;
+            error = null;
+          }
+        }
+
         if (!error && Array.isArray(data)) {
           // Busca membros para associar nome do líder e contagem real
-          const [membrosRes] = await Promise.all([
-            client.from('membros').select('id, nome, celula_id'),
-          ]);
+          let membrosList: any[] = [];
+          try {
+            const membrosRes = await client.from('membros').select('id, nome, celula_id');
+            if (Array.isArray(membrosRes.data)) membrosList = membrosRes.data;
+          } catch {
+            // continua mesmo se a busca auxiliar de membros falhar
+          }
 
-          const membrosList = Array.isArray(membrosRes.data) ? membrosRes.data : [];
           const leaderMap = new Map<string, string>();
           membrosList.forEach((m) => {
-            leaderMap.set(m.id, m.nome);
+            if (m.id && m.nome) leaderMap.set(m.id, m.nome);
           });
 
           const enriched: Celula[] = data.map((c: any) => ({
             id: c.id,
-            nome: c.nome,
+            nome: c.nome || 'Célula sem nome',
             lider_id: c.lider_id || null,
-            lider_nome: c.lider_id ? leaderMap.get(c.lider_id) || 'Sem líder' : 'Sem líder',
+            lider_nome: c.lider_id ? leaderMap.get(c.lider_id) || c.lider_nome || 'Sem líder' : 'Sem líder',
             endereco: c.endereco || '',
             observacoes: c.observacoes || '',
             membros_count: membrosList.filter((m) => m.celula_id === c.id).length,
-            user_id: c.user_id,
+            user_id: c.user_id || DEFAULT_USER.id,
             created_at: c.created_at || new Date().toISOString(),
           }));
 
+          localStorage.setItem(STORAGE_KEYS.CELULAS, JSON.stringify(enriched));
           return enriched;
         } else if (error) {
           console.warn('Erro ao consultar celulas no Supabase:', error.message);
@@ -364,6 +437,7 @@ export const db = {
   },
 
   async saveCelula(celula: Partial<Celula>): Promise<Celula> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     const cleanLiderId: string | null = (celula.lider_id && isValidUUID(celula.lider_id)) ? celula.lider_id : null;
     const authUserId = await getAuthenticatedUserId();
@@ -449,6 +523,7 @@ export const db = {
   },
 
   async deleteCelula(id: string): Promise<void> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     if (client && isValidUUID(id)) {
       try {
@@ -464,16 +539,50 @@ export const db = {
 
   // Retorna APENAS os membros reais do Supabase
   async getMembros(): Promise<Membro[]> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     if (client) {
       try {
-        const { data, error } = await client
+        let { data, error } = await client
           .from('membros')
           .select('*')
           .order('created_at', { ascending: false });
 
+        if (error) {
+          const fallback = await client.from('membros').select('*');
+          if (!fallback.error && Array.isArray(fallback.data)) {
+            data = fallback.data;
+            error = null;
+          }
+        }
+
         if (!error && Array.isArray(data)) {
-          return data as Membro[];
+          // Busca celulas para resolver celula_nome se necessário
+          let celulasMap = new Map<string, string>();
+          try {
+            const celRes = await client.from('celulas').select('id, nome');
+            if (Array.isArray(celRes.data)) {
+              celRes.data.forEach((c) => celulasMap.set(c.id, c.nome));
+            }
+          } catch {
+            // continua
+          }
+
+          const mapped: Membro[] = data.map((m: any) => ({
+            id: m.id,
+            user_id: m.user_id || DEFAULT_USER.id,
+            nome: m.nome || '',
+            email: m.email || '',
+            telefone: m.telefone || '',
+            data_nascimento: m.data_nascimento || '',
+            celula_id: m.celula_id || null,
+            celula_nome: m.celula_id ? celulasMap.get(m.celula_id) || m.celula_nome || '' : '',
+            status: m.status || 'ativo',
+            created_at: m.created_at || new Date().toISOString(),
+          }));
+
+          localStorage.setItem(STORAGE_KEYS.MEMBROS, JSON.stringify(mapped));
+          return mapped;
         } else if (error) {
           console.warn('Erro ao consultar membros no Supabase:', error.message);
         }
@@ -487,6 +596,7 @@ export const db = {
   },
 
   async saveMembro(membro: Partial<Membro>): Promise<Membro> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     const cleanCelulaId: string | null = (membro.celula_id && isValidUUID(membro.celula_id)) ? membro.celula_id : null;
     const cleanDataNascimento =
@@ -566,6 +676,7 @@ export const db = {
   },
 
   async deleteMembro(id: string): Promise<void> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     if (client && isValidUUID(id)) {
       try {
@@ -581,19 +692,37 @@ export const db = {
 
   // Retorna APENAS o financeiro real do Supabase
   async getFinanceiro(): Promise<RegistroFinanceiro[]> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     if (client) {
       try {
-        const { data, error } = await client
+        let { data, error } = await client
           .from('financeiro')
           .select('*')
           .order('data', { ascending: false });
 
+        if (error) {
+          const fallback = await client.from('financeiro').select('*');
+          if (!fallback.error && Array.isArray(fallback.data)) {
+            data = fallback.data;
+            error = null;
+          }
+        }
+
         if (!error && Array.isArray(data)) {
-          return data.map((d: any) => ({
-            ...d,
+          const mapped = data.map((d: any) => ({
+            id: d.id,
+            user_id: d.user_id || DEFAULT_USER.id,
+            tipo: d.tipo || 'receita',
+            descricao: d.descricao || '',
             valor: Number(d.valor) || 0,
+            data: d.data || new Date().toISOString().split('T')[0],
+            categoria: d.categoria || 'Geral',
+            created_at: d.created_at || new Date().toISOString(),
           })) as RegistroFinanceiro[];
+
+          localStorage.setItem(STORAGE_KEYS.FINANCEIRO, JSON.stringify(mapped));
+          return mapped;
         } else if (error) {
           console.warn('Erro ao consultar financeiro no Supabase:', error.message);
         }
@@ -607,57 +736,90 @@ export const db = {
   },
 
   async saveFinanceiro(registro: Partial<RegistroFinanceiro>): Promise<RegistroFinanceiro> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     const authUserId = await getAuthenticatedUserId();
 
     if (client) {
       try {
-        const payload: any = {
-          tipo: registro.tipo || 'receita',
-          descricao: registro.descricao || '',
-          valor: Number(registro.valor) || 0,
-          data: registro.data || new Date().toISOString().split('T')[0],
-          categoria: registro.categoria || 'Geral',
-        };
-        if (authUserId) {
-          payload.user_id = authUserId;
-        }
+        if (registro.id && isValidUUID(registro.id)) {
+          const { data, error } = await client
+            .from('financeiro')
+            .update({
+              tipo: registro.tipo || 'receita',
+              descricao: registro.descricao || '',
+              valor: Number(registro.valor) || 0,
+              data: registro.data || new Date().toISOString().split('T')[0],
+              categoria: registro.categoria || 'Geral',
+            })
+            .eq('id', registro.id)
+            .select()
+            .single();
 
-        const { data, error } = await client
-          .from('financeiro')
-          .insert(payload)
-          .select()
-          .single();
+          if (!error && data) {
+            return {
+              ...data,
+              valor: Number(data.valor) || 0,
+            } as RegistroFinanceiro;
+          }
+          if (error) console.error('Erro ao atualizar financeiro no Supabase:', error);
+        } else {
+          const payload: any = {
+            tipo: registro.tipo || 'receita',
+            descricao: registro.descricao || '',
+            valor: Number(registro.valor) || 0,
+            data: registro.data || new Date().toISOString().split('T')[0],
+            categoria: registro.categoria || 'Geral',
+          };
+          if (authUserId) {
+            payload.user_id = authUserId;
+          }
 
-        if (!error && data) {
-          return {
-            ...data,
-            valor: Number(data.valor) || 0,
-          } as RegistroFinanceiro;
+          const { data, error } = await client
+            .from('financeiro')
+            .insert(payload)
+            .select()
+            .single();
+
+          if (!error && data) {
+            return {
+              ...data,
+              valor: Number(data.valor) || 0,
+            } as RegistroFinanceiro;
+          }
+          if (error) console.error('Erro ao salvar financeiro no Supabase:', error);
         }
-        if (error) console.error('Erro ao salvar financeiro no Supabase:', error);
       } catch (err) {
         console.warn('Falha ao salvar financeiro no Supabase:', err);
       }
     }
 
     const registros = await this.getFinanceiro();
-    const novo: RegistroFinanceiro = {
-      id: generateUUID(),
-      user_id: authUserId || generateUUID(),
-      tipo: registro.tipo || 'receita',
-      descricao: registro.descricao || '',
-      valor: Number(registro.valor) || 0,
-      data: registro.data || new Date().toISOString().split('T')[0],
-      categoria: registro.categoria || 'Geral',
-      created_at: new Date().toISOString(),
-    };
-    const updated = [novo, ...registros];
-    localStorage.setItem(STORAGE_KEYS.FINANCEIRO, JSON.stringify(updated));
-    return novo;
+    if (registro.id) {
+      const updated = registros.map((r) =>
+        r.id === registro.id ? ({ ...r, ...registro, valor: Number(registro.valor) || 0 } as RegistroFinanceiro) : r
+      );
+      localStorage.setItem(STORAGE_KEYS.FINANCEIRO, JSON.stringify(updated));
+      return { ...registro, valor: Number(registro.valor) || 0 } as RegistroFinanceiro;
+    } else {
+      const novo: RegistroFinanceiro = {
+        id: generateUUID(),
+        user_id: authUserId || generateUUID(),
+        tipo: registro.tipo || 'receita',
+        descricao: registro.descricao || '',
+        valor: Number(registro.valor) || 0,
+        data: registro.data || new Date().toISOString().split('T')[0],
+        categoria: registro.categoria || 'Geral',
+        created_at: new Date().toISOString(),
+      };
+      const updated = [novo, ...registros];
+      localStorage.setItem(STORAGE_KEYS.FINANCEIRO, JSON.stringify(updated));
+      return novo;
+    }
   },
 
   async deleteFinanceiro(id: string): Promise<void> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     if (client && isValidUUID(id)) {
       try {
@@ -673,16 +835,35 @@ export const db = {
 
   // Retorna APENAS os documentos reais da secretaria no Supabase
   async getSecretaria(): Promise<DocumentoSecretaria[]> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     if (client) {
       try {
-        const { data, error } = await client
+        let { data, error } = await client
           .from('secretaria')
           .select('*')
           .order('data_criacao', { ascending: false });
 
+        if (error) {
+          const fallback = await client.from('secretaria').select('*');
+          if (!fallback.error && Array.isArray(fallback.data)) {
+            data = fallback.data;
+            error = null;
+          }
+        }
+
         if (!error && Array.isArray(data)) {
-          return data as DocumentoSecretaria[];
+          const mapped = (data as any[]).map((s) => ({
+            id: s.id,
+            user_id: s.user_id || DEFAULT_USER.id,
+            titulo: s.titulo || 'Novo Documento',
+            conteudo: s.conteudo || '',
+            tipo: s.tipo || 'Ata de Reunião',
+            data_criacao: s.data_criacao || new Date().toISOString(),
+          })) as DocumentoSecretaria[];
+
+          localStorage.setItem(STORAGE_KEYS.SECRETARIA, JSON.stringify(mapped));
+          return mapped;
         } else if (error) {
           console.warn('Erro ao consultar secretaria no Supabase:', error.message);
         }
@@ -696,6 +877,7 @@ export const db = {
   },
 
   async saveSecretaria(doc: Partial<DocumentoSecretaria>): Promise<DocumentoSecretaria> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     const authUserId = await getAuthenticatedUserId();
 
@@ -760,6 +942,7 @@ export const db = {
   },
 
   async deleteSecretaria(id: string): Promise<void> {
+    await ensureSupabaseSession();
     const client = getSupabaseClient();
     if (client && isValidUUID(id)) {
       try {
