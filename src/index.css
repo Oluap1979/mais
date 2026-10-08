@@ -11,3 +11,53 @@
     background-color: #f9fafb;
   }
 }
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm 15mm;
+  }
+
+  /* Oculta toda a interface e elementos do sistema */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Esconde especificamente a barra de ferramentas e painel de edição */
+  .no-print,
+  .no-print * {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Torna visível apenas o documento oficial */
+  .documento-oficial-print,
+  .documento-oficial-print * {
+    visibility: visible !important;
+  }
+
+  .documento-oficial-print {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body, html {
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+}

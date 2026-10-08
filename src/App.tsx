@@ -301,6 +301,7 @@ function MainApp() {
               documentos={secretaria}
               onSaveDocumento={handleSaveDocumento}
               onDeleteDocumento={handleDeleteDocumento}
+              user={user}
             />
           )}
 

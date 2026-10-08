@@ -14,15 +14,27 @@ export function formatCurrency(value: number): string {
 
 export function formatDate(dateString: string): string {
   if (!dateString) return '';
-  const [year, month, day] = dateString.split('-');
-  if (year && month && day) {
-    return `${day}/${month}/${year}`;
-  }
   try {
+    // If it's a simple YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      const [year, month, day] = dateString.split('-');
+      return `${day}/${month}/${year}`;
+    }
     const d = new Date(dateString);
+    if (isNaN(d.getTime())) return dateString;
     return d.toLocaleDateString('pt-BR');
   } catch {
     return dateString;
+  }
+}
+
+export function formatDateLong(dateString?: string): string {
+  try {
+    const d = dateString ? new Date(dateString) : new Date();
+    if (isNaN(d.getTime())) return new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+    return d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+  } catch {
+    return '';
   }
 }
 

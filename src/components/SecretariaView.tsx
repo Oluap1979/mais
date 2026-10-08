@@ -8,18 +8,21 @@ import { Button } from './ui/button';
 import { Plus, Briefcase, FileText, Award, Scroll, Printer, Trash2, Search, Eye } from 'lucide-react';
 import { formatDate } from '../lib/utils';
 import { useToast } from './ui/toast';
-import type { DocumentoSecretaria } from '../types/database';
+import { DocumentoOficial } from './DocumentoOficial';
+import type { DocumentoSecretaria, UserSession } from '../types/database';
 
 interface SecretariaViewProps {
   documentos: DocumentoSecretaria[];
   onSaveDocumento: (doc: Partial<DocumentoSecretaria>) => Promise<void>;
   onDeleteDocumento: (id: string) => Promise<void>;
+  user?: UserSession | null;
 }
 
 export function SecretariaView({
   documentos,
   onSaveDocumento,
   onDeleteDocumento,
+  user,
 }: SecretariaViewProps) {
   const { toastSuccess, toastError } = useToast();
 
@@ -57,17 +60,32 @@ export function SecretariaView({
     if (tipoSelecionado === 'Ata de Reunião') {
       setTitulo('Ata da Reunião Ministerial Ordinária');
       setConteudo(
-        'Aos [DATA], reuniram-se na sede da igreja os membros da liderança pastoral para deliberações sobre o avanço dos ministérios, aprovação de contas e planejamento dos eventos do Reino.'
+        'Aos [DATA], reuniram-se na sede da igreja os membros da liderança pastoral para deliberações sobre o avanço dos ministérios, aprovação de contas e planejamento dos eventos do Reino de Deus. Todos os pontos de pauta foram aprovados por unanimidade em espírito de comunhão e oração.'
       );
     } else if (tipoSelecionado === 'Certificado de Batismo') {
       setTitulo('Certificado de Batismo nas Águas');
       setConteudo(
-        'Certificamos para os devidos fins que o(a) irmão(ã) [NOME DO MEMBRO] desceu às águas batismais em profissão de fé em Cristo Jesus, conforme a ordenança bíblica de Mateus 28:19.'
+        'Certificamos para os devidos fins que o(a) amado(a) irmão(ã) [NOME DO MEMBRO], tendo professado publicamente a sua fé no Senhor Jesus Cristo, desceu às águas batismais em conformidade com a ordenança apostólica do Evangelho de Mateus 28:19.'
       );
     } else if (tipoSelecionado === 'Carta de Recomendação') {
-      setTitulo('Carta Pastoral de Mudança e Recomendação');
+      setTitulo('Carta Pastoral de Recomendação e Mudança');
       setConteudo(
-        'Recomendamos fraternalmente à comunidade receptora o(a) irmão(ã) [NOME], que residia nesta cidade e sempre manteve conduta bíblica exemplar e comunhão fraterna.'
+        'Por meio desta, temos a honra de recomendar à vossa amorosa comunhão cristã o(a) estimado(a) irmão(ã) [NOME DO MEMBRO], membro exemplar e comungante desta igreja, que durante o período de convívio conosco testemunhou conduta cristã irrepreensível e fiel serviço no Reino.'
+      );
+    } else if (tipoSelecionado === 'Certificado de Apresentação') {
+      setTitulo('Certificado de Apresentação de Criança');
+      setConteudo(
+        'Certificamos que a criança [NOME DA CRIANÇA], filha de [NOME DOS PAIS], foi solenemente apresentada ao Senhor Jesus Cristo no templo desta igreja, recebendo a oração e bênção pastoral conforme as Sagradas Escrituras.'
+      );
+    } else if (tipoSelecionado === 'Edital Eclesiástico') {
+      setTitulo('Edital de Convocação Eclesiástica');
+      setConteudo(
+        'Convocamos todos os membros em comunhão desta congregação para a Assembleia Geral Eclesiástica Ordinária, a realizar-se no templo sede no dia [DATA], às [HORÁRIO], a fim de deliberar sobre assuntos de interesse da comunidade.'
+      );
+    } else if (tipoSelecionado === 'Ofício Administrativo') {
+      setTitulo('Ofício Pastoral Administrativo');
+      setConteudo(
+        'Cumprimentando-o(a) cordialmente com a graça e a paz de nosso Senhor Jesus Cristo, servimo-nos do presente ofício para comunicar formalmente [ASSUNTO OU SOLICITAÇÃO], colocando-nos à disposição em espírito fraterno.'
       );
     }
   };
@@ -335,33 +353,13 @@ export function SecretariaView({
         </form>
       </Dialog>
 
-      {/* Modal de Leitura / Impressão do Documento */}
+      {/* Visualizador & Emissor Profissional de Documento Oficial A4 */}
       {selectedDoc && (
-        <Dialog open={Boolean(selectedDoc)} onOpenChange={(open) => !open && setSelectedDoc(null)}>
-          <DialogHeader>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
-                {selectedDoc.tipo}
-              </span>
-              <span className="text-xs text-gray-400">{formatDate(selectedDoc.data_criacao)}</span>
-            </div>
-            <DialogTitle className="text-xl font-bold">{selectedDoc.titulo}</DialogTitle>
-          </DialogHeader>
-
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
-            {selectedDoc.conteudo}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => window.print()} className="gap-2">
-              <Printer className="h-4 w-4" />
-              <span>Imprimir Documento</span>
-            </Button>
-            <Button variant="default" onClick={() => setSelectedDoc(null)}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </Dialog>
+        <DocumentoOficial
+          documento={selectedDoc}
+          user={user || null}
+          onClose={() => setSelectedDoc(null)}
+        />
       )}
 
       {/* Confirmação de exclusão */}
