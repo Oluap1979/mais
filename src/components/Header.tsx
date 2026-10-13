@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Menu, Church, Settings, RefreshCw } from 'lucide-react';
+import React from 'react';
+import { Menu, Church, Settings } from 'lucide-react';
 import type { UserSession } from '../types/database';
 import type { NavItemKey } from './Sidebar';
 
@@ -19,19 +19,8 @@ const titles: Record<NavItemKey, { title: string; subtitle: string }> = {
   financeiro: { title: 'Gestão Financeira', subtitle: 'Dízimos, ofertas, relatórios e saídas' },
 };
 
-export function Header({ currentPath, onOpenMobileMenu, user, onOpenConfig, onRefresh }: HeaderProps) {
+export function Header({ currentPath, onOpenMobileMenu, user, onOpenConfig }: HeaderProps) {
   const current = titles[currentPath] || titles.dashboard;
-  const [refreshing, setRefreshing] = useState(false);
-
-  const handleSync = async () => {
-    if (!onRefresh) return;
-    setRefreshing(true);
-    try {
-      await onRefresh();
-    } finally {
-      setTimeout(() => setRefreshing(false), 500);
-    }
-  };
 
   return (
     <header className="sticky top-0 z-20 flex h-16 w-full items-center justify-between border-b border-gray-200 bg-white/95 px-4 sm:px-8 backdrop-blur-xs">
@@ -53,21 +42,6 @@ export function Header({ currentPath, onOpenMobileMenu, user, onOpenConfig, onRe
 
       {/* Right zone: Church community, settings & profile */}
       <div className="flex items-center gap-2.5 sm:gap-3">
-
-        {/* Botão de sincronização rápida com o banco */}
-        {onRefresh && (
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100 transition-colors text-xs font-medium cursor-pointer"
-            title="Sincronizar tabelas agora com o banco de dados"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 text-blue-600 ${refreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden xl:inline">Sincronizar</span>
-          </button>
-        )}
-
         <div className="hidden lg:flex items-center gap-2 text-xs text-gray-600 font-medium">
           <Church className="h-4 w-4 text-blue-600" />
           <span className="text-gray-900 font-semibold">{user?.igreja || 'Mais Igreja'}</span>
