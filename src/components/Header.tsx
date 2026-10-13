@@ -52,7 +52,7 @@ export function Header({ currentPath, onOpenMobileMenu, user, onOpenConfig }: He
             type="button"
             onClick={onOpenConfig}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100 transition-colors text-xs font-semibold cursor-pointer shadow-2xs"
-            title="Configurações da Igreja e do Sistema"
+            title="Configurações da Igreja"
           >
             <Settings className="h-3.5 w-3.5 text-blue-600" />
             <span className="hidden sm:inline">Configurações</span>

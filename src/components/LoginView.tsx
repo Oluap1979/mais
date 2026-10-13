@@ -172,7 +172,7 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
               igreja,
             };
             db.setUser(user);
-            toastSuccess('✅ Login efetuado com sucesso no Supabase!');
+            toastSuccess('✅ Login efetuado com sucesso!');
             onLoginSuccess(user);
             return;
           } else if (authRes.error) {
@@ -252,7 +252,7 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
             }
 
             db.setUser(newUser);
-            toastSuccess('✅ Conta criada com sucesso no Supabase!');
+            toastSuccess('✅ Conta criada com sucesso!');
             onLoginSuccess(newUser);
             return;
           }

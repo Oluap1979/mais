@@ -315,7 +315,7 @@ function MainApp() {
         </main>
       </div>
 
-      {/* Modal de Configuração e SQL Supabase */}
+      {/* Modal de Configurações da Igreja */}
       <SupabaseConfigModal
         open={configModalOpen}
         onOpenChange={setConfigModalOpen}
