@@ -5,7 +5,8 @@ import { Input } from './ui/input';
 import { Select } from './ui/select';
 import { Textarea } from './ui/textarea';
 import { Button } from './ui/button';
-import { Plus, Pencil, Trash, MapPin, Users, User, Info, Search } from 'lucide-react';
+import { Plus, Pencil, Trash, MapPin, Users, User, Info, Search, FileDown } from 'lucide-react';
+import { exportToCsv } from '../lib/spreadsheet';
 import { useToast } from './ui/toast';
 import type { Celula, Membro } from '../types/database';
 
@@ -123,14 +124,36 @@ export function CelulasView({
           </p>
         </div>
 
-        {/* Botão Nova Célula */}
-        <button
-          onClick={handleOpenNew}
-          className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-semibold shadow-xs cursor-pointer active:bg-blue-800"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Nova Célula</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const headers = ['Nome da Célula', 'Líder', 'Endereço', 'Observações', 'Total de Membros'];
+              const rows = celulas.map((c) => [
+                c.nome,
+                c.lider_nome || '',
+                c.endereco || '',
+                c.observacoes || '',
+                getMembrosCount(c.id, c.membros_count),
+              ]);
+              exportToCsv(`planilha_celulas_${new Date().toISOString().split('T')[0]}`, headers, rows);
+              toastSuccess('📥 Planilha de Células exportada!');
+            }}
+            className="inline-flex items-center justify-center gap-2 bg-white text-gray-700 border border-gray-300 px-3 py-2 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium shadow-2xs cursor-pointer"
+            title="Exportar planilha de células em formato CSV / Excel"
+          >
+            <FileDown className="h-4 w-4 text-emerald-600" />
+            <span className="hidden sm:inline">Exportar Planilha</span>
+          </button>
+
+          {/* Botão Nova Célula */}
+          <button
+            onClick={handleOpenNew}
+            className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-semibold shadow-xs cursor-pointer active:bg-blue-800"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Nova Célula</span>
+          </button>
+        </div>
       </div>
 
       {/* Busca rápida */}

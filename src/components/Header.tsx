@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { Menu, Church, Settings, Database, RefreshCw } from 'lucide-react';
+import { Menu, Church, Settings, RefreshCw } from 'lucide-react';
 import type { UserSession } from '../types/database';
 import type { NavItemKey } from './Sidebar';
-import { isSupabaseConfigured } from '../lib/supabase';
 
 interface HeaderProps {
   currentPath: NavItemKey;
@@ -22,7 +21,6 @@ const titles: Record<NavItemKey, { title: string; subtitle: string }> = {
 
 export function Header({ currentPath, onOpenMobileMenu, user, onOpenConfig, onRefresh }: HeaderProps) {
   const current = titles[currentPath] || titles.dashboard;
-  const isConnected = isSupabaseConfigured();
   const [refreshing, setRefreshing] = useState(false);
 
   const handleSync = async () => {
@@ -53,25 +51,8 @@ export function Header({ currentPath, onOpenMobileMenu, user, onOpenConfig, onRe
         </div>
       </div>
 
-      {/* Right zone: Church community, database connection status, settings & profile */}
+      {/* Right zone: Church community, settings & profile */}
       <div className="flex items-center gap-2.5 sm:gap-3">
-        {/* Status do Banco de Dados Conectado */}
-        <button
-          type="button"
-          onClick={onOpenConfig}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${
-            isConnected
-              ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-              : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-          }`}
-          title={isConnected ? 'Banco de dados Supabase Conectado' : 'Configurar conexão com o Supabase'}
-        >
-          <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-          <Database className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">
-            {isConnected ? 'Supabase Conectado' : 'Conectar Banco'}
-          </span>
-        </button>
 
         {/* Botão de sincronização rápida com o banco */}
         {onRefresh && (

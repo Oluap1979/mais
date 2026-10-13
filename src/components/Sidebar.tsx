@@ -1,4 +1,3 @@
-import React from 'react';
 import { LayoutDashboard, Users, Group, Briefcase, DollarSign, Church, LogOut, Settings } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { UserSession } from '../types/database';

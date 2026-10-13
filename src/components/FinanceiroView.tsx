@@ -6,8 +6,9 @@ import { Input } from './ui/input';
 import { Select } from './ui/select';
 import { Button } from './ui/button';
 import { DatePicker } from './ui/date-picker';
-import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, Trash2, Search, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, Trash2, Search, ArrowDownCircle, ArrowUpCircle, FileDown } from 'lucide-react';
 import { formatCurrency, formatDate } from '../lib/utils';
+import { exportToCsv } from '../lib/spreadsheet';
 import { useToast } from './ui/toast';
 import type { RegistroFinanceiro, FinancialType } from '../types/database';
 
@@ -145,6 +146,25 @@ export function FinanceiroView({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const headers = ['Tipo', 'Descrição', 'Valor (R$)', 'Categoria', 'Data'];
+              const rows = financeiro.map((f) => [
+                f.tipo === 'receita' ? 'Entrada (Receita)' : 'Saída (Despesa)',
+                f.descricao,
+                f.valor.toFixed(2),
+                f.categoria || 'Geral',
+                f.data,
+              ]);
+              exportToCsv(`planilha_financeiro_${new Date().toISOString().split('T')[0]}`, headers, rows);
+              toastSuccess('📥 Planilha Financeira exportada com sucesso!');
+            }}
+            className="inline-flex items-center justify-center gap-1.5 bg-white text-gray-700 border border-gray-300 px-3 py-2 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium shadow-2xs cursor-pointer"
+            title="Exportar lançamentos financeiros em formato CSV / Excel"
+          >
+            <FileDown className="h-4 w-4 text-emerald-600" />
+            <span className="hidden sm:inline">Exportar Planilha</span>
+          </button>
           <button
             onClick={() => handleOpenNew('receita')}
             className="inline-flex items-center justify-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-semibold shadow-xs cursor-pointer"

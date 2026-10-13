@@ -5,8 +5,9 @@ import { Input } from './ui/input';
 import { Select } from './ui/select';
 import { Button } from './ui/button';
 import { DatePicker } from './ui/date-picker';
-import { Plus, Search, Pencil, Trash2, UserPlus, Phone, Mail, Calendar, Church } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, UserPlus, Phone, Mail, Calendar, Church, FileDown } from 'lucide-react';
 import { formatPhone, formatDate } from '../lib/utils';
+import { exportToCsv } from '../lib/spreadsheet';
 import { useToast } from './ui/toast';
 import type { Membro, Celula, MemberStatus } from '../types/database';
 
@@ -144,14 +145,37 @@ export function MembrosView({
           </p>
         </div>
 
-        {/* Botão Novo Membro */}
-        <button
-          onClick={handleOpenNew}
-          className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-semibold shadow-xs cursor-pointer active:bg-blue-800"
-        >
-          <UserPlus className="h-4 w-4" />
-          <span>Novo Membro</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const headers = ['Nome', 'E-mail', 'Telefone', 'Célula', 'Status', 'Data de Nascimento'];
+              const rows = membros.map((m) => [
+                m.nome,
+                m.email,
+                m.telefone || '',
+                m.celula_nome || '',
+                m.status,
+                m.data_nascimento || '',
+              ]);
+              exportToCsv(`planilha_membros_${new Date().toISOString().split('T')[0]}`, headers, rows);
+              toastSuccess('📥 Planilha de Membros exportada!');
+            }}
+            className="inline-flex items-center justify-center gap-2 bg-white text-gray-700 border border-gray-300 px-3 py-2 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium shadow-2xs cursor-pointer"
+            title="Exportar planilha de membros em formato CSV / Excel"
+          >
+            <FileDown className="h-4 w-4 text-emerald-600" />
+            <span className="hidden sm:inline">Exportar Planilha</span>
+          </button>
+
+          {/* Botão Novo Membro */}
+          <button
+            onClick={handleOpenNew}
+            className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-semibold shadow-xs cursor-pointer active:bg-blue-800"
+          >
+            <UserPlus className="h-4 w-4" />
+            <span>Novo Membro</span>
+          </button>
+        </div>
       </div>
 
       {/* Barra de Filtros e Busca */}

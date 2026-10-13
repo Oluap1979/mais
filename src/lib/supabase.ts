@@ -44,36 +44,10 @@ export const DEFAULT_CREDENTIALS = {
   password: 'Password123!',
 };
 
-// Limpeza estrita de qualquer dado fictício legado das tabelas
+// Preserva dados reais da congregação
 export function purgeFictitiousData(): void {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    const memStr = localStorage.getItem(STORAGE_KEYS.MEMBROS);
-    if (memStr && (memStr.includes('Carlos Eduardo Ferreira') || memStr.includes('b1111111') || memStr.includes('mem-01'))) {
-      localStorage.removeItem(STORAGE_KEYS.MEMBROS);
-    }
-
-    const celStr = localStorage.getItem(STORAGE_KEYS.CELULAS);
-    if (celStr && (celStr.includes('Célula Betel') || celStr.includes('a1111111') || celStr.includes('cel-01'))) {
-      localStorage.removeItem(STORAGE_KEYS.CELULAS);
-    }
-
-    const finStr = localStorage.getItem(STORAGE_KEYS.FINANCEIRO);
-    if (finStr && (finStr.includes('c1111111') || finStr.includes('fin-01') || finStr.includes('Dízimos do Culto'))) {
-      localStorage.removeItem(STORAGE_KEYS.FINANCEIRO);
-    }
-
-    const secStr = localStorage.getItem(STORAGE_KEYS.SECRETARIA);
-    if (secStr && (secStr.includes('d1111111') || secStr.includes('sec-01') || secStr.includes('Ata da Reunião Ministerial Ordinária - Outubro 2026'))) {
-      localStorage.removeItem(STORAGE_KEYS.SECRETARIA);
-    }
-  } catch (err) {
-    console.warn('Erro ao limpar dados fictícios:', err);
-  }
+  // Mantém os dados da comunidade eclesiástica preservados
 }
-
-// Executar limpeza imediatamente ao carregar o módulo
-purgeFictitiousData();
 
 /**
  * Higienização estrita da URL do Supabase:
@@ -121,7 +95,11 @@ export function cleanSupabaseUrl(rawUrl: string): string {
   }
 }
 
-// Obter URL e Key configuradas
+export const DEFAULT_SUPABASE_URL = 'https://cxnpkpviadmfaihmtlav.supabase.co';
+export const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4bnBrcHZpYWRtZmFpaG10bGF2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzOTk1MzcsImV4cCI6MjEwNjk3NTUzN30.zuEQfdNDbC78SQA_rqCedRsFDRCtXHQr_ab_1z8YL6U';
+
+// Obter URL e Key configuradas com fallback automático para o projeto oficial
 export function getStoredSupabaseConfig(): { url: string; key: string } {
   let localUrl = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '' : '';
   const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || '' : '';
@@ -129,8 +107,8 @@ export function getStoredSupabaseConfig(): { url: string; key: string } {
   const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
   const envKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '';
 
-  const rawUrl = localUrl || envUrl;
-  const cleanedUrl = cleanSupabaseUrl(rawUrl);
+  const rawUrl = localUrl || envUrl || DEFAULT_SUPABASE_URL;
+  const cleanedUrl = cleanSupabaseUrl(rawUrl) || DEFAULT_SUPABASE_URL;
 
   // Auto-correção no localStorage caso tenha sido salvo com caminho inválido
   if (localUrl && cleanedUrl !== localUrl && typeof localStorage !== 'undefined') {
@@ -141,7 +119,7 @@ export function getStoredSupabaseConfig(): { url: string; key: string } {
     }
   }
 
-  const key = (localKey || envKey).trim();
+  const key = (localKey || envKey || DEFAULT_SUPABASE_ANON_KEY).trim();
 
   return {
     url: cleanedUrl,
@@ -954,5 +932,147 @@ export const db = {
     const docs = await this.getSecretaria();
     const updated = docs.filter((d) => d.id !== id);
     localStorage.setItem(STORAGE_KEYS.SECRETARIA, JSON.stringify(updated));
+  },
+
+  // Inserção em Lote de Planilha para Membros
+  async saveMembrosBatch(membrosList: Partial<Membro>[]): Promise<number> {
+    await ensureSupabaseSession();
+    const client = getSupabaseClient();
+    const authUserId = await getAuthenticatedUserId();
+    let savedCount = 0;
+
+    if (client) {
+      for (const m of membrosList) {
+        try {
+          const cleanCelulaId = m.celula_id && isValidUUID(m.celula_id) ? m.celula_id : null;
+          const cleanDataNascimento = m.data_nascimento && m.data_nascimento.trim() ? m.data_nascimento.trim() : null;
+          const payload: any = {
+            nome: m.nome?.trim(),
+            email: m.email?.trim().toLowerCase() || `${generateUUID().slice(0, 8)}@maisigreja.local`,
+            telefone: m.telefone?.trim() || null,
+            data_nascimento: cleanDataNascimento,
+            celula_id: cleanCelulaId,
+            status: m.status || 'ativo',
+          };
+          if (authUserId) payload.user_id = authUserId;
+
+          const { error } = await client.from('membros').upsert(payload, { onConflict: 'email' });
+          if (!error) savedCount++;
+        } catch (e) {
+          console.warn('Erro ao salvar membro em lote:', e);
+        }
+      }
+    }
+
+    if (savedCount === 0 && membrosList.length > 0) {
+      // Fallback local
+      const current = await this.getMembros();
+      const newItems: Membro[] = membrosList.map((m) => ({
+        id: generateUUID(),
+        user_id: authUserId || generateUUID(),
+        nome: m.nome || 'Novo Membro',
+        email: m.email || `${generateUUID().slice(0, 8)}@maisigreja.local`,
+        telefone: m.telefone || '',
+        data_nascimento: m.data_nascimento || '',
+        celula_id: null,
+        status: m.status || 'ativo',
+        created_at: new Date().toISOString(),
+      }));
+      localStorage.setItem(STORAGE_KEYS.MEMBROS, JSON.stringify([...newItems, ...current]));
+      return newItems.length;
+    }
+
+    return savedCount;
+  },
+
+  // Inserção em Lote de Planilha para Financeiro
+  async saveFinanceiroBatch(registrosList: Partial<RegistroFinanceiro>[]): Promise<number> {
+    await ensureSupabaseSession();
+    const client = getSupabaseClient();
+    const authUserId = await getAuthenticatedUserId();
+    let savedCount = 0;
+
+    if (client) {
+      for (const r of registrosList) {
+        try {
+          const payload: any = {
+            tipo: r.tipo || 'receita',
+            descricao: r.descricao?.trim() || 'Lançamento de Planilha',
+            valor: Number(r.valor) || 0,
+            data: r.data || new Date().toISOString().split('T')[0],
+            categoria: r.categoria || 'Geral',
+          };
+          if (authUserId) payload.user_id = authUserId;
+
+          const { error } = await client.from('financeiro').insert(payload);
+          if (!error) savedCount++;
+        } catch (e) {
+          console.warn('Erro ao salvar financeiro em lote:', e);
+        }
+      }
+    }
+
+    if (savedCount === 0 && registrosList.length > 0) {
+      const current = await this.getFinanceiro();
+      const newItems: RegistroFinanceiro[] = registrosList.map((r) => ({
+        id: generateUUID(),
+        user_id: authUserId || generateUUID(),
+        tipo: r.tipo || 'receita',
+        descricao: r.descricao || 'Lançamento de Planilha',
+        valor: Number(r.valor) || 0,
+        data: r.data || new Date().toISOString().split('T')[0],
+        categoria: r.categoria || 'Geral',
+        created_at: new Date().toISOString(),
+      }));
+      localStorage.setItem(STORAGE_KEYS.FINANCEIRO, JSON.stringify([...newItems, ...current]));
+      return newItems.length;
+    }
+
+    return savedCount;
+  },
+
+  // Inserção em Lote de Planilha para Células
+  async saveCelulasBatch(celulasList: Partial<Celula>[]): Promise<number> {
+    await ensureSupabaseSession();
+    const client = getSupabaseClient();
+    const authUserId = await getAuthenticatedUserId();
+    let savedCount = 0;
+
+    if (client) {
+      for (const c of celulasList) {
+        try {
+          const payload: any = {
+            nome: c.nome?.trim() || 'Nova Célula',
+            endereco: c.endereco?.trim() || '',
+            observacoes: c.observacoes?.trim() || '',
+          };
+          if (authUserId) payload.user_id = authUserId;
+
+          const { error } = await client.from('celulas').insert(payload);
+          if (!error) savedCount++;
+        } catch (e) {
+          console.warn('Erro ao salvar célula em lote:', e);
+        }
+      }
+    }
+
+    if (savedCount === 0 && celulasList.length > 0) {
+      const current = await this.getCelulas();
+      const newItems: Celula[] = celulasList.map((c) => ({
+        id: generateUUID(),
+        user_id: authUserId || generateUUID(),
+        nome: c.nome || 'Nova Célula',
+        lider_id: null,
+        lider_nome: c.lider_nome || 'Sem líder',
+        endereco: c.endereco || '',
+        observacoes: c.observacoes || '',
+        membros_count: 0,
+        created_at: new Date().toISOString(),
+      }));
+      localStorage.setItem(STORAGE_KEYS.CELULAS, JSON.stringify([...newItems, ...current]));
+      return newItems.length;
+    }
+
+    return savedCount;
   },
 };
