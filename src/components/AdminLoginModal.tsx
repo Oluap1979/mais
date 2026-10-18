@@ -16,7 +16,7 @@ export function AdminLoginModal({ open, onOpenChange, onAdminLoginSuccess }: Adm
   const { toastSuccess, toastError } = useToast();
 
   const [adminEmail, setAdminEmail] = useState('paulotavares78@hotmail.com');
-  const [adminPassword, setAdminPassword] = useState('Typescript1978*#');
+  const [adminPassword, setAdminPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -37,9 +37,20 @@ export function AdminLoginModal({ open, onOpenChange, onAdminLoginSuccess }: Adm
         body: JSON.stringify({ email: adminEmail.trim(), password: adminPassword }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || 'Erro de comunicação com o servidor.' };
+      }
+
       if (!res.ok) {
         throw new Error(data.error || 'Falha ao autenticar administrador.');
+      }
+
+      if (!data.token) {
+        throw new Error('Token de sessão administrativa não retornado.');
       }
 
       localStorage.setItem(STORAGE_KEYS.ADMIN_TOKEN, data.token);
@@ -110,7 +121,7 @@ export function AdminLoginModal({ open, onOpenChange, onAdminLoginSuccess }: Adm
             />
           </div>
           <p className="text-[11px] text-gray-500 mt-1">
-            Senha configurada: <code className="bg-gray-100 px-1 py-0.5 rounded font-mono font-bold text-gray-800">Typescript1978*#</code>.
+            Insira a senha cadastrada para acessar o painel restrito.
           </p>
         </div>
 
