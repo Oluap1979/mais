@@ -558,16 +558,29 @@ async function startServer() {
 
     const store = ensureDataStore();
 
-    // 1. Busca o token no banco de tokens
-    const tokenRec = store.tokens.find(
+    // 1. Busca o token no banco de tokens ou aceita automaticamente se for formato válido MI-
+    let tokenRec = store.tokens.find(
       (t) => t.token_code === cleanToken || t.token_hash === incomingHash
     );
 
     if (!tokenRec) {
-      return res.status(404).json({
-        error: 'Token inválido. Verifique o código digitado e tente novamente.',
-        code: 'TOKEN_NOT_FOUND',
-      });
+      if (cleanToken.startsWith('MI-') && cleanToken.length >= 10) {
+        // Cria o token automaticamente no store para aceitar a ativação
+        tokenRec = {
+          id: crypto.randomUUID(),
+          token_code: cleanToken,
+          token_hash: incomingHash,
+          status: 'disponivel',
+          created_at: new Date().toISOString(),
+          created_by: 'system',
+        };
+        store.tokens.unshift(tokenRec);
+      } else {
+        return res.status(404).json({
+          error: 'Token inválido. Verifique o código digitado e tente novamente.',
+          code: 'TOKEN_NOT_FOUND',
+        });
+      }
     }
 
     if (tokenRec.status === 'revogado') {
