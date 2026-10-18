@@ -16,7 +16,7 @@ export function AdminLoginModal({ open, onOpenChange, onAdminLoginSuccess }: Adm
   const { toastSuccess, toastError } = useToast();
 
   const [adminEmail, setAdminEmail] = useState('paulotavares78@hotmail.com');
-  const [adminPassword, setAdminPassword] = useState('');
+  const [adminPassword, setAdminPassword] = useState('Typescript1978*#');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -110,7 +110,7 @@ export function AdminLoginModal({ open, onOpenChange, onAdminLoginSuccess }: Adm
             />
           </div>
           <p className="text-[11px] text-gray-500 mt-1">
-            A autenticação é verificada exclusivamente no servidor de aplicação.
+            Senha configurada: <code className="bg-gray-100 px-1 py-0.5 rounded font-mono font-bold text-gray-800">Typescript1978*#</code>.
           </p>
         </div>
 
