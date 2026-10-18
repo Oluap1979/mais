@@ -1,5 +1,13 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Membro, Celula, RegistroFinanceiro, DocumentoSecretaria, UserSession } from '../types/database';
+import type {
+  Membro,
+  Celula,
+  RegistroFinanceiro,
+  DocumentoSecretaria,
+  UserSession,
+  ChurchLicense,
+  LicenseStatus,
+} from '../types/database';
 
 // Chaves de armazenamento Local
 export const STORAGE_KEYS = {
@@ -11,6 +19,8 @@ export const STORAGE_KEYS = {
   SUPABASE_URL: 'mais_igreja_supabase_url',
   SUPABASE_KEY: 'mais_igreja_supabase_anon_key',
   REGISTERED_USERS: 'mais_igreja_registered_users',
+  LICENSE: 'mais_igreja_license',
+  ADMIN_TOKEN: 'mais_igreja_admin_token',
 };
 
 export interface RegisteredAccount {
@@ -365,7 +375,7 @@ async function getAuthenticatedUserId(): Promise<string | null> {
 
 // Métodos de dados: LÊ E PERSISTE EXCLUSIVAMENTE DADOS REAIS
 export const db = {
-  getUser(): UserSession {
+  getUser(): UserSession | null {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.USER);
       if (stored) {
@@ -375,12 +385,7 @@ export const db = {
     } catch {
       // fallback
     }
-    try {
-      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(DEFAULT_USER));
-    } catch {
-      // ignore
-    }
-    return DEFAULT_USER;
+    return null;
   },
 
   setUser(user: UserSession | null): void {
@@ -388,7 +393,114 @@ export const db = {
       localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
     } else {
       localStorage.removeItem(STORAGE_KEYS.USER);
+      localStorage.removeItem(STORAGE_KEYS.LICENSE);
     }
+  },
+
+  // Retorna a licença do usuário/igreja conectada
+  async getLicense(email?: string, userId?: string): Promise<ChurchLicense> {
+    const user = this.getUser();
+    const queryEmail = email || user?.email;
+    const queryUserId = userId || user?.id;
+
+    if (!queryEmail && !queryUserId) {
+      return { status: 'trial_expired', daysRemaining: 0 };
+    }
+
+    try {
+      const res = await fetch(
+        `/api/license/status?email=${encodeURIComponent(queryEmail || '')}&userId=${encodeURIComponent(queryUserId || '')}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.exists) {
+          const lic: ChurchLicense = {
+            status: data.status,
+            daysRemaining: data.daysRemaining ?? 0,
+            trialStart: data.trialStart,
+            trialEnd: data.trialEnd,
+            activatedAt: data.activatedAt,
+            igrejaNome: data.igrejaNome,
+            email: data.email,
+          };
+          localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
+          return lic;
+        }
+      }
+    } catch (e) {
+      console.warn('Erro ao consultar status da licença no servidor:', e);
+    }
+
+    // Fallback local caso offline
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.LICENSE);
+      if (local) {
+        return JSON.parse(local);
+      }
+    } catch {
+      // continua
+    }
+
+    return { status: 'trial', daysRemaining: 14 };
+  },
+
+  // Inicia o teste gratuito de 14 dias (Opção A)
+  async startTrial(data: {
+    email: string;
+    igreja_nome: string;
+    responsavel_nome?: string;
+    cargo?: string;
+    user_id?: string;
+  }): Promise<{ success: boolean; status: LicenseStatus; daysRemaining: number; message: string }> {
+    const res = await fetch('/api/license/start-trial', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.error || 'Erro ao iniciar período de teste.');
+    }
+    const lic: ChurchLicense = {
+      status: json.status,
+      daysRemaining: json.daysRemaining ?? 14,
+      trialStart: json.trial_start,
+      trialEnd: json.trial_end,
+      igrejaNome: data.igreja_nome,
+      email: data.email,
+    };
+    localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
+    return json;
+  },
+
+  // Ativa a licença permanente vitalícia através do Token (Opção B)
+  async activateToken(data: {
+    token: string;
+    email: string;
+    igreja_nome: string;
+    responsavel_nome?: string;
+    cargo?: string;
+    user_id?: string;
+  }): Promise<{ success: boolean; status: LicenseStatus; message: string }> {
+    const res = await fetch('/api/license/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.error || 'Erro ao validar e ativar token.');
+    }
+    const lic: ChurchLicense = {
+      status: 'active',
+      daysRemaining: 0,
+      activatedAt: new Date().toISOString(),
+      tokenCode: data.token,
+      igrejaNome: data.igreja_nome,
+      email: data.email,
+    };
+    localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
+    return json;
   },
 
   // Retorna APENAS as células reais do Supabase

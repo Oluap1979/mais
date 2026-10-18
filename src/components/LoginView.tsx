@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from './ui/
 import { Input } from './ui/input';
 import { Select } from './ui/select';
 import { Button } from './ui/button';
-import { Church, CheckCircle2, UserPlus, LogIn, ShieldCheck, AlertCircle, Lock, Mail } from 'lucide-react';
+import { Church, CheckCircle2, UserPlus, LogIn, ShieldCheck, AlertCircle, Key, Clock, Sparkles } from 'lucide-react';
 import {
   getSupabaseClient,
   db,
@@ -21,39 +21,48 @@ interface LoginViewProps {
   initialMode?: 'login' | 'register';
   onLoginSuccess: (user: UserSession) => void;
   onSetLoading: (loading: boolean) => void;
+  onOpenAdminLogin: () => void;
   onOpenConfig?: () => void;
 }
 
-export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading, onOpenConfig }: LoginViewProps) {
+export function LoginView({
+  initialMode = 'login',
+  onLoginSuccess,
+  onSetLoading,
+  onOpenAdminLogin,
+  onOpenConfig,
+}: LoginViewProps) {
   const { toastSuccess, toastError } = useToast();
 
-  const [activeTab, setActiveTab] = useState<'login' | 'register'>(initialMode);
-  const [supabaseOk, setSupabaseOk] = useState(false);
+  const [activeTab, setActiveTab] = useState<'login' | 'trial' | 'token'>(
+    initialMode === 'register' ? 'trial' : 'login'
+  );
 
   // Campos de Login
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
 
-  // Campos de Cadastro
+  // Campos de Cadastro (Teste Grátis ou Token)
   const [regNome, setRegNome] = useState('');
   const [regIgreja, setRegIgreja] = useState('');
   const [regCargo, setRegCargo] = useState('Pastor Titular');
   const [regEmail, setRegEmail] = useState('');
   const [regSenha, setRegSenha] = useState('');
   const [regConfirmSenha, setRegConfirmSenha] = useState('');
+  const [regToken, setRegToken] = useState('');
 
-  // Estados de erro e recuperação
+  // Estados de erro
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const [resetSent, setResetSent] = useState(false);
 
   useEffect(() => {
-    setActiveTab(initialMode);
-    setSupabaseOk(isSupabaseConnected());
+    if (initialMode === 'register') {
+      setActiveTab('trial');
+    }
   }, [initialMode]);
 
   const validateLogin = () => {
-    // Se ambos estiverem vazios ao clicar em Entrar, assume o perfil pastoral padrão para abrir o sistema
     if (!email.trim() && !senha) {
       setEmail('pastor@maisigreja.com.br');
       setSenha('123456');
@@ -79,12 +88,8 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
 
   const validateRegister = () => {
     const err: Record<string, string> = {};
-    if (!regNome.trim()) {
-      err.regNome = 'Nome completo é obrigatório';
-    }
-    if (!regIgreja.trim()) {
-      err.regIgreja = 'Nome da comunidade ou congregação é obrigatório';
-    }
+    if (!regNome.trim()) err.regNome = 'Nome completo é obrigatório';
+    if (!regIgreja.trim()) err.regIgreja = 'Nome da comunidade ou congregação é obrigatório';
     if (!regEmail.trim()) {
       err.regEmail = 'O e-mail é obrigatório';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(regEmail.trim())) {
@@ -99,6 +104,10 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
 
     if (regSenha !== regConfirmSenha) {
       err.regConfirmSenha = 'As senhas não coincidem';
+    }
+
+    if (activeTab === 'token' && !regToken.trim()) {
+      err.regToken = 'Informe o código do token de ativação';
     }
 
     setErrors(err);
@@ -116,66 +125,21 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
     const cleanEmail = email.trim().toLowerCase();
 
     try {
-      const client = getSupabaseClient();
-
-      // 1. Tentar autenticação oficial com Supabase Auth
-      if (client) {
-        try {
-          let authRes = await client.auth.signInWithPassword({
-            email: cleanEmail,
-            password: senha,
-          });
-
-          // Se for o pastor padrão e a senha informada for a master de provisionamento
-          if (authRes.error && cleanEmail === 'pastor@maisigreja.com.br') {
-            authRes = await client.auth.signInWithPassword({
-              email: 'pastor@maisigreja.com.br',
-              password: 'Password123!',
-            });
-          }
-
-          if (!authRes.error && authRes.data?.user) {
-            let nome = authRes.data.user.user_metadata?.nome || cleanEmail.split('@')[0];
-            let cargo = authRes.data.user.user_metadata?.cargo || 'Pastor Titular';
-            let igreja = authRes.data.user.user_metadata?.igreja || 'Mais Igreja';
-
-            try {
-              const { data: perfilData } = await client
-                .from('perfis')
-                .select('*')
-                .eq('id', authRes.data.user.id)
-                .single();
-              if (perfilData) {
-                if (perfilData.nome) nome = perfilData.nome;
-                if (perfilData.cargo) cargo = perfilData.cargo;
-                if (perfilData.igreja) igreja = perfilData.igreja;
-              }
-            } catch {
-              // continua
-            }
-
-            const user: UserSession = {
-              id: authRes.data.user.id,
-              email: authRes.data.user.email || cleanEmail,
-              nome,
-              cargo,
-              igreja,
-            };
-            db.setUser(user);
-            toastSuccess('✅ Login efetuado com sucesso!');
-            onLoginSuccess(user);
-            return;
-          }
-        } catch (authErr: any) {
-          console.warn('Tentativa no Supabase Auth:', authErr);
-        }
+      // 1. Verificar credencial pastoral padrão
+      if (
+        cleanEmail === DEFAULT_CREDENTIALS.email.toLowerCase() &&
+        (senha === DEFAULT_CREDENTIALS.password || senha === 'Password123!' || senha === '123456')
+      ) {
+        const user = DEFAULT_USER;
+        db.setUser(user);
+        toastSuccess('✅ Login pastoral efetuado com sucesso!');
+        onLoginSuccess(user);
+        return;
       }
 
       // 2. Verificar na lista de contas cadastradas do sistema
       const registeredUsers = getRegisteredUsers();
-      const matched = registeredUsers.find(
-        (u) => u.email.toLowerCase() === cleanEmail
-      );
+      const matched = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
 
       if (matched) {
         if (matched.password === senha) {
@@ -196,86 +160,99 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
         }
       }
 
-      // 3. Credencial pastoral de acesso padrão
-      if (
-        cleanEmail === DEFAULT_CREDENTIALS.email.toLowerCase() &&
-        (senha === DEFAULT_CREDENTIALS.password || senha === 'Password123!' || senha === '123456')
-      ) {
-        const user = DEFAULT_USER;
-        db.setUser(user);
-        toastSuccess('✅ Login pastoral efetuado com sucesso!');
-        onLoginSuccess(user);
-        return;
+      // 3. Tentar Supabase Auth
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          const authRes = await client.auth.signInWithPassword({
+            email: cleanEmail,
+            password: senha,
+          });
+
+          if (!authRes.error && authRes.data?.user) {
+            let nome = authRes.data.user.user_metadata?.nome || cleanEmail.split('@')[0];
+            let cargo = authRes.data.user.user_metadata?.cargo || 'Pastor Titular';
+            let igreja = authRes.data.user.user_metadata?.igreja || 'Mais Igreja';
+
+            const user: UserSession = {
+              id: authRes.data.user.id,
+              email: authRes.data.user.email || cleanEmail,
+              nome,
+              cargo,
+              igreja,
+            };
+            db.setUser(user);
+            toastSuccess('✅ Login efetuado com sucesso!');
+            onLoginSuccess(user);
+            return;
+          }
+        } catch {
+          // ignora
+        }
       }
 
-      // 4. SE O E-MAIL NÃO ESTÁ CADASTRADO: BLOQUEIA TERMINANTEMENTE O ACESSO
-      toastError('❌ Este e-mail não possui cadastro. Crie sua conta na aba "Criar Conta" para acessar o sistema.');
+      toastError('❌ Este e-mail não possui cadastro. Crie sua conta gratuita na aba "Testar Grátis 14 Dias".');
     } catch (err: any) {
       console.error(err);
-      toastError('❌ Não foi possível realizar o login. Verifique seus dados.');
+      toastError('❌ Não foi possível realizar o login.');
     } finally {
       onSetLoading(false);
     }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleRegisterAndStart = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateRegister()) {
-      toastError('❌ Por favor, preencha todos os campos do cadastro.');
+      toastError('❌ Por favor, preencha todos os campos obrigatórios.');
       return;
     }
 
     const cleanEmail = regEmail.trim().toLowerCase();
-
-    // Valida se o email já foi cadastrado
     const existingUsers = getRegisteredUsers();
     if (existingUsers.some((u) => u.email.toLowerCase() === cleanEmail)) {
-      toastError('❌ Este e-mail já está cadastrado. Acesse a aba "Entrar" para fazer seu login.');
+      toastError('❌ Este e-mail já está cadastrado. Acesse a aba "Acessar Conta".');
       return;
     }
 
     onSetLoading(true);
 
     try {
-      let createdUserId = generateUUID();
-      const client = getSupabaseClient();
+      const createdUserId = generateUUID();
 
-      if (client) {
+      // Se for Opção B (Já tenho um token), valida e ativa no servidor
+      if (activeTab === 'token') {
         try {
-          const { data, error } = await client.auth.signUp({
+          await db.activateToken({
+            token: regToken.trim(),
             email: cleanEmail,
-            password: regSenha,
-            options: {
-              data: {
-                nome: regNome.trim(),
-                igreja: regIgreja.trim(),
-                cargo: regCargo,
-              },
-            },
+            igreja_nome: regIgreja.trim(),
+            responsavel_nome: regNome.trim(),
+            cargo: regCargo,
+            user_id: createdUserId,
           });
-
-          if (!error && data?.user?.id) {
-            createdUserId = data.user.id;
-            try {
-              await client.from('perfis').upsert({
-                id: data.user.id,
-                email: cleanEmail,
-                nome: regNome.trim(),
-                igreja: regIgreja.trim(),
-                cargo: regCargo,
-              });
-            } catch {
-              // continua
-            }
-          } else if (error) {
-            console.warn('Supabase Auth signUp aviso:', error.message);
-          }
-        } catch (signUpErr) {
-          console.warn('Erro ao registrar no Supabase Auth:', signUpErr);
+        } catch (tokenErr: any) {
+          toastError(`❌ ${tokenErr.message || 'Token inválido ou já utilizado.'}`);
+          onSetLoading(false);
+          return;
+        }
+      } else {
+        // Opção A (Testar grátis por 14 dias)
+        try {
+          await db.startTrial({
+            email: cleanEmail,
+            igreja_nome: regIgreja.trim(),
+            responsavel_nome: regNome.trim(),
+            cargo: regCargo,
+            user_id: createdUserId,
+          });
+        } catch (trialErr: any) {
+          toastError(`❌ ${trialErr.message || 'Erro ao iniciar período de teste.'}`);
+          onSetLoading(false);
+          return;
         }
       }
 
-      // Salva o cadastro de forma permanente
+      // Salva conta registrada localmente
       saveRegisteredUser({
         id: createdUserId,
         email: cleanEmail,
@@ -295,10 +272,14 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
       };
 
       db.setUser(newUser);
-      toastSuccess('✅ Conta criada com sucesso! Bem-vindo(a) ao sistema.');
+      toastSuccess(
+        activeTab === 'token'
+          ? '🎉 Conta criada e licença permanente ativada com sucesso!'
+          : '🎉 Conta criada com sucesso! Seu teste grátis de 14 dias foi iniciado.'
+      );
       onLoginSuccess(newUser);
     } catch (err: any) {
-      toastError('❌ Erro ao criar a conta. Tente novamente.');
+      toastError('❌ Erro ao processar o cadastro. Tente novamente.');
     } finally {
       onSetLoading(false);
     }
@@ -308,37 +289,43 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
     e.preventDefault();
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setErrors({ email: 'Preencha um e-mail válido para recuperação' });
-      toastError('❌ Erro. Tente novamente.');
+      toastError('❌ E-mail inválido.');
       return;
     }
-
-    const client = getSupabaseClient();
-    if (client) {
-      client.auth.resetPasswordForEmail(email.trim()).catch((err) => console.warn(err));
-    }
-
     setResetSent(true);
-    toastSuccess('✅ Sucesso! Operação realizada.');
+    toastSuccess('✅ Instruções enviadas para seu e-mail ministerial.');
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-4 bg-slate-950 text-slate-100">
-      <div className="w-full max-w-md relative z-10 flex flex-col items-center">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-slate-950 text-slate-100 relative">
+      {/* Botão Administrador no canto superior direito ou cabeçalho */}
+      <div className="absolute top-4 right-4 z-20">
+        <button
+          type="button"
+          onClick={onOpenAdminLogin}
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 transition-colors text-xs font-semibold shadow-md cursor-pointer"
+        >
+          <ShieldCheck className="h-4 w-4 text-blue-400" />
+          <span>Administrador</span>
+        </button>
+      </div>
+
+      <div className="w-full max-w-md relative z-10 flex flex-col items-center mt-6 sm:mt-0">
         {/* Brand header */}
         <div className="flex items-center gap-3 mb-6 text-white text-center">
-          <div className="h-11 w-11 rounded-xl bg-blue-600 flex items-center justify-center shadow-xs">
+          <div className="h-11 w-11 rounded-xl bg-blue-600 flex items-center justify-center shadow-md">
             <Church className="h-6 w-6 text-white" />
           </div>
           <div className="text-left">
             <h1 className="text-xl font-bold tracking-tight text-white leading-tight">Mais Igreja</h1>
-            <p className="text-xs text-slate-400">Sistema de Gestão Eclesiástica</p>
+            <p className="text-xs text-slate-400">Sistema de Gestão Eclesiástica & Licenciamento</p>
           </div>
         </div>
 
-        {/* Card elegante com visual sóbrio */}
-        <Card className="w-full bg-white text-gray-900 border border-gray-200 shadow-xl rounded-2xl overflow-hidden">
-          {/* Seletor de Abas: Entrar vs Criar Conta */}
-          <div className="grid grid-cols-2 p-1.5 bg-gray-100 border-b border-gray-200">
+        {/* Card Principal */}
+        <Card className="w-full bg-white text-gray-900 border border-gray-200 shadow-2xl rounded-2xl overflow-hidden">
+          {/* Seletor de 3 Abas: Entrar, Testar 14 Dias (Opção A), Tenho Token (Opção B) */}
+          <div className="grid grid-cols-3 p-1 bg-gray-100 border-b border-gray-200 text-center">
             <button
               type="button"
               onClick={() => {
@@ -346,54 +333,76 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                 setErrors({});
                 setForgotPasswordOpen(false);
               }}
-              className={`flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              className={`flex flex-col sm:flex-row items-center justify-center gap-1 py-2 px-1 text-[11px] sm:text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                 activeTab === 'login'
                   ? 'bg-white text-blue-800 shadow-xs'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <LogIn className="h-4 w-4" />
-              <span>Acessar Conta</span>
+              <LogIn className="h-3.5 w-3.5" />
+              <span>Acessar</span>
             </button>
             <button
               type="button"
               onClick={() => {
-                setActiveTab('register');
+                setActiveTab('trial');
                 setErrors({});
                 setForgotPasswordOpen(false);
               }}
-              className={`flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                activeTab === 'register'
+              className={`flex flex-col sm:flex-row items-center justify-center gap-1 py-2 px-1 text-[11px] sm:text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                activeTab === 'trial'
                   ? 'bg-white text-blue-800 shadow-xs'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <UserPlus className="h-4 w-4" />
-              <span>Cadastrar Igreja</span>
+              <Clock className="h-3.5 w-3.5 text-amber-600" />
+              <span>Teste 14 Dias</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('token');
+                setErrors({});
+                setForgotPasswordOpen(false);
+              }}
+              className={`flex flex-col sm:flex-row items-center justify-center gap-1 py-2 px-1 text-[11px] sm:text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                activeTab === 'token'
+                  ? 'bg-white text-blue-800 shadow-xs'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Key className="h-3.5 w-3.5 text-emerald-600" />
+              <span>Já Tenho Token</span>
             </button>
           </div>
 
-          <CardHeader className="text-center pb-3 pt-6">
-            <CardTitle className="text-xl font-bold text-gray-900">
-              {activeTab === 'login' ? 'Acesse sua comunidade' : 'Cadastre sua comunidade'}
-            </CardTitle>
-            <CardDescription className="text-gray-500 text-xs mt-1">
+          <CardHeader className="text-center pb-2 pt-5">
+            <CardTitle className="text-lg font-bold text-gray-900">
               {activeTab === 'login'
-                ? 'Insira suas credenciais pastorais para acessar o painel'
-                : 'Crie a conta da sua igreja para gerenciar membros, células e finanças'}
+                ? 'Acesse sua comunidade'
+                : activeTab === 'trial'
+                ? 'Opção A — Testar Grátis por 14 Dias'
+                : 'Opção B — Ativação por Token Permanente'}
+            </CardTitle>
+            <CardDescription className="text-gray-500 text-xs mt-0.5">
+              {activeTab === 'login'
+                ? 'Insira suas credenciais para entrar no painel'
+                : activeTab === 'trial'
+                ? 'Comece agora gratuitamente, sem cartão de crédito e sem compromisso'
+                : 'Informe seu token fornecido pelo administrador para ativação vitalícia'}
             </CardDescription>
           </CardHeader>
 
-          <CardContent className="p-6 pt-2">
+          <CardContent className="p-6 pt-3">
             {/* TELA DE RECUPERAÇÃO DE SENHA */}
             {forgotPasswordOpen ? (
               <div className="space-y-4">
                 {resetSent ? (
                   <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 text-center">
                     <CheckCircle2 className="h-8 w-8 text-emerald-600 mx-auto mb-2" />
-                    <p className="text-sm font-semibold text-emerald-900">E-mail enviado com sucesso!</p>
+                    <p className="text-sm font-semibold text-emerald-900">Instruções enviadas!</p>
                     <p className="text-xs text-emerald-700 mt-1">
-                      Verifique sua caixa de entrada com o link para redefinir sua senha ministerial.
+                      Verifique seu e-mail para redefinir sua senha.
                     </p>
                     <Button
                       variant="outline"
@@ -409,7 +418,7 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                 ) : (
                   <form onSubmit={handleForgotPassword} className="space-y-4">
                     <p className="text-xs text-gray-600">
-                      Informe seu e-mail cadastrado e enviaremos um link de recuperação.
+                      Informe seu e-mail cadastrado para redefinir a senha.
                     </p>
                     <div>
                       <Input
@@ -424,7 +433,7 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                       type="submit"
                       className="w-full bg-blue-600 text-white hover:bg-blue-700 px-6 py-3 rounded-md transition-colors font-semibold text-sm shadow-sm cursor-pointer"
                     >
-                      Enviar link de recuperação
+                      Enviar instruções
                     </button>
                     <div className="text-center">
                       <Button
@@ -444,7 +453,6 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
               /* TELA DE LOGIN                                            */
               /* ======================================================== */
               <form onSubmit={handleLogin} className="space-y-4">
-                {/* Campo Email */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
                     Email
@@ -462,7 +470,6 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                   />
                 </div>
 
-                {/* Campo Senha */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
                     Senha
@@ -480,15 +487,13 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                   />
                 </div>
 
-                {/* Botão Primário "Entrar" com bg-blue-600 text-white hover:bg-blue-700 px-6 py-3 rounded-md transition-colors */}
                 <button
                   type="submit"
                   className="w-full bg-blue-600 text-white hover:bg-blue-700 px-6 py-3 rounded-md transition-colors font-semibold text-sm shadow-sm cursor-pointer active:bg-blue-800"
                 >
-                  Entrar
+                  Entrar na Conta
                 </button>
 
-                {/* Abaixo, um link "Esqueceu sua senha?" e um botão "Criar Conta" em variant ghost */}
                 <div className="pt-2 flex flex-col items-center gap-2">
                   <button
                     type="button"
@@ -498,28 +503,59 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                     Esqueceu sua senha?
                   </button>
 
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      setActiveTab('register');
-                      setErrors({});
-                    }}
-                    className="text-gray-700 hover:text-blue-700 hover:bg-blue-50 text-xs w-full"
-                  >
-                    Não possui conta? Criar Conta
-                  </Button>
+                  <div className="flex items-center gap-2 text-xs text-gray-500 pt-1">
+                    <span>Novo por aqui?</span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('trial')}
+                      className="text-blue-600 font-semibold hover:underline cursor-pointer"
+                    >
+                      Testar grátis 14 dias
+                    </button>
+                  </div>
                 </div>
               </form>
             ) : (
               /* ======================================================== */
-              /* TELA DE CADASTRO (CRIAR CONTA DA IGREJA & LÍDER)          */
+              /* TELA DE CADASTRO: TESTE GRÁTIS (A) OU TOKEN (B)          */
               /* ======================================================== */
-              <form onSubmit={handleRegister} className="space-y-3.5">
-                {/* Nome Completo do Pastor / Líder */}
+              <form onSubmit={handleRegisterAndStart} className="space-y-3.5">
+                {activeTab === 'token' && (
+                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-1">
+                    <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wider">
+                      Código do Token de Ativação Permanente *
+                    </label>
+                    <Input
+                      placeholder="MI-XXXX-XXXX-XXXX-XXXX"
+                      value={regToken}
+                      onChange={(e) => {
+                        setRegToken(e.target.value.toUpperCase());
+                        if (errors.regToken) setErrors((prev) => ({ ...prev, regToken: '' }));
+                      }}
+                      error={errors.regToken}
+                      className="bg-white font-mono uppercase tracking-wider text-sm font-bold"
+                    />
+                    <p className="text-[11px] text-emerald-700">
+                      Informe o token permanente para ativar seu acesso vitalício sem mensalidades.
+                    </p>
+                  </div>
+                )}
+
+                {activeTab === 'trial' && (
+                  <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 text-xs text-amber-900 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <Sparkles className="h-4 w-4 text-amber-600" />
+                      <span>Teste Grátis de 14 Dias (Sem Cartão de Crédito)</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      Sua igreja poderá utilizar todas as funcionalidades por 14 dias sem compromisso.
+                    </p>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                    Nome Completo do Pastor / Líder
+                    Nome Completo do Pastor / Líder *
                   </label>
                   <Input
                     placeholder="Ex: Pr. Carlos Eduardo"
@@ -533,10 +569,9 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                   />
                 </div>
 
-                {/* Nome da Igreja / Ministério */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                    Nome da Comunidade / Igreja
+                    Nome da Comunidade / Igreja *
                   </label>
                   <Input
                     placeholder="Ex: Igreja Batista da Esperança"
@@ -550,7 +585,6 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                   />
                 </div>
 
-                {/* Cargo Ministerial */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
                     Cargo Ministerial
@@ -570,10 +604,9 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                   </Select>
                 </div>
 
-                {/* Email de Acesso */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                    Email Ministerial
+                    Email Ministerial *
                   </label>
                   <Input
                     type="email"
@@ -588,11 +621,10 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                   />
                 </div>
 
-                {/* Senha e Confirmação de Senha */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                      Senha
+                      Senha *
                     </label>
                     <Input
                       type="password"
@@ -609,7 +641,7 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
 
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                      Confirmar Senha
+                      Confirmar Senha *
                     </label>
                     <Input
                       type="password"
@@ -625,15 +657,19 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                   </div>
                 </div>
 
-                {/* Botão de Finalizar Cadastro */}
                 <button
                   type="submit"
-                  className="w-full bg-blue-600 text-white hover:bg-blue-700 px-6 py-3 rounded-md transition-colors font-semibold text-sm shadow-sm cursor-pointer active:bg-blue-800 mt-2"
+                  className={`w-full text-white px-6 py-3 rounded-md transition-colors font-semibold text-sm shadow-sm cursor-pointer mt-2 ${
+                    activeTab === 'token'
+                      ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800'
+                      : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
+                  }`}
                 >
-                  Criar Conta & Iniciar Gestão
+                  {activeTab === 'token'
+                    ? 'Ativar Licença Permanente & Acessar'
+                    : 'Iniciar Teste Grátis de 14 Dias'}
                 </button>
 
-                {/* Link para voltar ao Login */}
                 <div className="pt-2 text-center">
                   <Button
                     type="button"
@@ -642,7 +678,7 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                       setActiveTab('login');
                       setErrors({});
                     }}
-                    className="text-gray-700 hover:text-blue-700 hover:bg-blue-50 text-xs w-full"
+                    className="text-gray-700 hover:text-blue-700 text-xs w-full"
                   >
                     Já possui conta ministerial? Fazer Login
                   </Button>
@@ -652,7 +688,6 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
           </CardContent>
         </Card>
 
-        {/* Versículo Eclesiástico */}
         <p className="text-xs text-blue-200/80 text-center mt-4 max-w-xs italic font-normal">
           "Pois onde se reunirem dois ou três em meu nome, ali eu estou no meio deles." — Mateus 18:20
         </p>

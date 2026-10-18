@@ -183,3 +183,78 @@ CREATE INDEX IF NOT EXISTS idx_celulas_user_id ON public.celulas(user_id);
 CREATE INDEX IF NOT EXISTS idx_financeiro_user_id ON public.financeiro(user_id);
 CREATE INDEX IF NOT EXISTS idx_financeiro_data ON public.financeiro(data);
 CREATE INDEX IF NOT EXISTS idx_secretaria_user_id ON public.secretaria(user_id);
+
+-- =========================================================
+-- 5. TABELA DE LICENÇAS E CONTROLE DE TESTE GRÁTIS
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.licencas_igreja (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    igreja_nome TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'trial' CHECK (status IN ('trial', 'trial_expired', 'active', 'revoked')),
+    trial_start TIMESTAMPTZ DEFAULT now() NOT NULL,
+    trial_end TIMESTAMPTZ DEFAULT (now() + INTERVAL '14 days') NOT NULL,
+    activated_at TIMESTAMPTZ,
+    token_code TEXT,
+    token_hash TEXT,
+    observacoes TEXT,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+
+-- =========================================================
+-- 6. TABELA DE TOKENS DE ATIVAÇÃO PERMANENTE
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.tokens_licenca (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    token_code TEXT UNIQUE NOT NULL,
+    token_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'disponivel' CHECK (status IN ('disponivel', 'utilizado', 'revogado')),
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    created_by TEXT DEFAULT 'paulotavares78@hotmail.com',
+    activated_at TIMESTAMPTZ,
+    activated_by_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    activated_by_igreja TEXT,
+    activated_by_email TEXT,
+    observacoes TEXT
+);
+
+-- =========================================================
+-- 7. TABELA DE HISTÓRICO DE AUDITORIA E OPERAÇÕES
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.historico_operacoes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tipo TEXT NOT NULL,
+    descricao TEXT NOT NULL,
+    user_email TEXT,
+    igreja_nome TEXT,
+    detalhes JSONB,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+
+-- Habilitar RLS
+ALTER TABLE public.licencas_igreja ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tokens_licenca ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.historico_operacoes ENABLE ROW LEVEL SECURITY;
+
+-- Políticas para licencas_igreja
+DROP POLICY IF EXISTS "Usuários visualizam sua própria licença" ON public.licencas_igreja;
+CREATE POLICY "Usuários visualizam sua própria licença"
+    ON public.licencas_igreja
+    FOR SELECT
+    TO authenticated
+    USING (auth.uid() = user_id OR email = auth.jwt()->>'email');
+
+-- Permissões gerais
+GRANT ALL ON TABLE public.licencas_igreja TO authenticated;
+GRANT SELECT ON TABLE public.tokens_licenca TO authenticated;
+GRANT ALL ON TABLE public.historico_operacoes TO authenticated;
+
+-- Índices de Licenças
+CREATE INDEX IF NOT EXISTS idx_licencas_email ON public.licencas_igreja(email);
+CREATE INDEX IF NOT EXISTS idx_licencas_status ON public.licencas_igreja(status);
+CREATE INDEX IF NOT EXISTS idx_tokens_code ON public.tokens_licenca(token_code);
+CREATE INDEX IF NOT EXISTS idx_tokens_hash ON public.tokens_licenca(token_hash);
+CREATE INDEX IF NOT EXISTS idx_tokens_status ON public.tokens_licenca(status);
+

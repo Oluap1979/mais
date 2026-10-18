@@ -1,0 +1,1048 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  ShieldCheck,
+  Key,
+  Church,
+  Clock,
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  LogOut,
+  RefreshCw,
+  Plus,
+  Search,
+  Filter,
+  History,
+  Lock,
+  XCircle,
+  Eye,
+  Check,
+  ChevronRight,
+  Sparkles,
+} from 'lucide-react';
+import { useToast } from './ui/toast';
+import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+
+interface AdminPanelProps {
+  adminToken: string;
+  onLogoutAdmin: () => void;
+}
+
+interface StatsData {
+  churches: {
+    total: number;
+    activeTrials: number;
+    expiredTrials: number;
+    activeLicenses: number;
+    revokedLicenses: number;
+  };
+  tokens: {
+    total: number;
+    available: number;
+    used: number;
+    revoked: number;
+  };
+}
+
+interface TokenItem {
+  id: string;
+  token_code: string;
+  status: 'disponivel' | 'utilizado' | 'revogado';
+  created_at: string;
+  created_by: string;
+  activated_at?: string;
+  activated_by_igreja?: string;
+  activated_by_email?: string;
+  observacoes?: string;
+}
+
+interface ChurchItem {
+  id: string;
+  user_id?: string;
+  igreja_nome: string;
+  email: string;
+  responsavel_nome?: string;
+  cargo?: string;
+  status: 'trial' | 'trial_expired' | 'active' | 'revoked';
+  trial_start: string;
+  trial_end: string;
+  activated_at?: string;
+  token_code?: string;
+  created_at: string;
+}
+
+interface LogItem {
+  id: string;
+  tipo: string;
+  descricao: string;
+  user_email?: string;
+  igreja_nome?: string;
+  created_at: string;
+}
+
+export function AdminPanel({ adminToken, onLogoutAdmin }: AdminPanelProps) {
+  const { toastSuccess, toastError } = useToast();
+
+  const [activeTab, setActiveTab] = useState<'tokens' | 'churches' | 'logs'>('tokens');
+  const [loading, setLoading] = useState(false);
+  const [stats, setStats] = useState<StatsData | null>(null);
+
+  // Dados
+  const [tokens, setTokens] = useState<TokenItem[]>([]);
+  const [churches, setChurches] = useState<ChurchItem[]>([]);
+  const [logs, setLogs] = useState<LogItem[]>([]);
+
+  // Geração de Tokens
+  const [tokenQty, setTokenQty] = useState(1);
+  const [tokenNote, setTokenNote] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [lastGenerated, setLastGenerated] = useState<TokenItem[]>([]);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+
+  // Filtros
+  const [tokenFilter, setTokenFilter] = useState<'todos' | 'disponivel' | 'utilizado' | 'revogado'>('todos');
+  const [tokenSearch, setTokenSearch] = useState('');
+  const [churchSearch, setChurchSearch] = useState('');
+
+  // Modal de confirmação de revogação
+  const [confirmRevokeChurch, setConfirmRevokeChurch] = useState<ChurchItem | null>(null);
+  const [confirmRevokeToken, setConfirmRevokeToken] = useState<TokenItem | null>(null);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/stats', {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStats(data);
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar estatísticas:', err);
+    }
+  }, [adminToken]);
+
+  const fetchTokens = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/tokens', {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTokens(data.tokens || []);
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar tokens:', err);
+    }
+  }, [adminToken]);
+
+  const fetchChurches = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/churches', {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setChurches(data.churches || []);
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar igrejas:', err);
+    }
+  }, [adminToken]);
+
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/logs', {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data.logs || []);
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar auditoria:', err);
+    }
+  }, [adminToken]);
+
+  const refreshAll = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([fetchStats(), fetchTokens(), fetchChurches(), fetchLogs()]);
+    setLoading(false);
+  }, [fetchStats, fetchTokens, fetchChurches, fetchLogs]);
+
+  useEffect(() => {
+    refreshAll();
+  }, [refreshAll]);
+
+  // Gerar Tokens
+  const handleGenerateTokens = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGenerating(true);
+    try {
+      const res = await fetch('/api/admin/tokens/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ count: tokenQty, observacoes: tokenNote }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Erro ao gerar tokens.');
+      }
+      setLastGenerated(data.tokens || []);
+      setTokenNote('');
+      toastSuccess(`✅ ${data.count} token(s) permanente(s) gerado(s) com sucesso!`);
+      refreshAll();
+    } catch (err: any) {
+      toastError(`❌ ${err.message || 'Falha na geração de tokens.'}`);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Copiar código do token
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedToken(code);
+    toastSuccess(`📋 Token copiado: ${code}`);
+    setTimeout(() => {
+      setCopiedToken((prev) => (prev === code ? null : prev));
+    }, 3000);
+  };
+
+  // Revogar Token
+  const handleRevokeToken = async (tokenId: string) => {
+    try {
+      const res = await fetch('/api/admin/tokens/revoke', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ tokenId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao revogar token.');
+      toastSuccess('✅ Token revogado com sucesso!');
+      setConfirmRevokeToken(null);
+      refreshAll();
+    } catch (err: any) {
+      toastError(`❌ ${err.message}`);
+    }
+  };
+
+  // Revogar Licença da Igreja
+  const handleRevokeChurch = async (churchId: string) => {
+    try {
+      const res = await fetch('/api/admin/churches/revoke', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ churchId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao revogar licença da igreja.');
+      toastSuccess('✅ Licença da igreja revogada!');
+      setConfirmRevokeChurch(null);
+      refreshAll();
+    } catch (err: any) {
+      toastError(`❌ ${err.message}`);
+    }
+  };
+
+  // Ativar Licença Permanente para Igreja
+  const handleActivateChurch = async (churchId: string) => {
+    try {
+      const res = await fetch('/api/admin/churches/activate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ churchId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao ativar licença permanente.');
+      toastSuccess('✅ Licença permanente ativada para esta igreja!');
+      refreshAll();
+    } catch (err: any) {
+      toastError(`❌ ${err.message}`);
+    }
+  };
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return '—';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const calculateDaysRemaining = (endStr: string) => {
+    try {
+      const now = Date.now();
+      const end = new Date(endStr).getTime();
+      return Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
+    } catch {
+      return 0;
+    }
+  };
+
+  // Filtragem de Tokens
+  const filteredTokens = tokens.filter((t) => {
+    if (tokenFilter !== 'todos' && t.status !== tokenFilter) return false;
+    if (tokenSearch) {
+      const search = tokenSearch.toLowerCase();
+      return (
+        t.token_code.toLowerCase().includes(search) ||
+        (t.activated_by_igreja && t.activated_by_igreja.toLowerCase().includes(search)) ||
+        (t.activated_by_email && t.activated_by_email.toLowerCase().includes(search)) ||
+        (t.observacoes && t.observacoes.toLowerCase().includes(search))
+      );
+    }
+    return true;
+  });
+
+  // Filtragem de Igrejas
+  const filteredChurches = churches.filter((c) => {
+    if (!churchSearch) return true;
+    const search = churchSearch.toLowerCase();
+    return (
+      c.igreja_nome.toLowerCase().includes(search) ||
+      c.email.toLowerCase().includes(search) ||
+      (c.responsavel_nome && c.responsavel_nome.toLowerCase().includes(search)) ||
+      (c.token_code && c.token_code.toLowerCase().includes(search))
+    );
+  });
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+      {/* Top Navbar Administrativo */}
+      <header className="sticky top-0 z-30 bg-slate-900/95 border-b border-slate-800 backdrop-blur-md px-4 sm:px-8 py-3.5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md">
+            <ShieldCheck className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-bold text-white tracking-tight leading-tight">
+                Painel Administrativo Mais Igreja
+              </h1>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                Super Admin
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">
+              Gestão de Licenças, Testes de 14 Dias e Tokens Criptografados
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>paulotavares78@hotmail.com</span>
+          </div>
+
+          <button
+            onClick={refreshAll}
+            disabled={loading}
+            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700 cursor-pointer disabled:opacity-50"
+            title="Atualizar dados"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-400' : ''}`} />
+          </button>
+
+          <Button
+            onClick={onLogoutAdmin}
+            variant="outline"
+            className="text-xs border-rose-900/60 bg-rose-950/40 text-rose-300 hover:bg-rose-900/40 hover:text-white"
+          >
+            <LogOut className="h-3.5 w-3.5 mr-1.5" />
+            <span>Sair do Admin</span>
+          </Button>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+        {/* KPI CARDS */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-slate-400 font-medium">Total de Igrejas</p>
+                <p className="text-2xl font-bold text-white mt-0.5">{stats?.churches.total ?? 0}</p>
+                <p className="text-[11px] text-slate-400 mt-1">comunidades cadastradas</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl bg-blue-900/40 border border-blue-800/50 flex items-center justify-center text-blue-400">
+                <Church className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-amber-400 font-medium">Testes Ativos (14d)</p>
+                <p className="text-2xl font-bold text-amber-300 mt-0.5">{stats?.churches.activeTrials ?? 0}</p>
+                <p className="text-[11px] text-slate-400 mt-1">período experimental</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl bg-amber-900/40 border border-amber-800/50 flex items-center justify-center text-amber-400">
+                <Clock className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-rose-400 font-medium">Testes Expirados</p>
+                <p className="text-2xl font-bold text-rose-300 mt-0.5">{stats?.churches.expiredTrials ?? 0}</p>
+                <p className="text-[11px] text-slate-400 mt-1">aguardando ativação</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl bg-rose-900/40 border border-rose-800/50 flex items-center justify-center text-rose-400">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-emerald-400 font-medium">Licenças Permanentes</p>
+                <p className="text-2xl font-bold text-emerald-300 mt-0.5">{stats?.churches.activeLicenses ?? 0}</p>
+                <p className="text-[11px] text-slate-400 mt-1">acesso vitalício ativo</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl bg-emerald-900/40 border border-emerald-800/50 flex items-center justify-center text-emerald-400">
+                <CheckCircle2 className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm col-span-2 lg:col-span-1">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-purple-400 font-medium">Tokens Disponíveis</p>
+                <p className="text-2xl font-bold text-purple-300 mt-0.5">{stats?.tokens.available ?? 0}</p>
+                <p className="text-[11px] text-slate-400 mt-1">prontos para entrega</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl bg-purple-900/40 border border-purple-800/50 flex items-center justify-center text-purple-400">
+                <Key className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* GERADOR DE TOKENS CRIPTOGRAFADOS */}
+        <Card className="bg-slate-900/90 border-slate-800 text-slate-100 shadow-md">
+          <CardHeader className="pb-3 border-b border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-blue-400" />
+                <CardTitle className="text-base font-bold text-white">
+                  Gerador de Tokens de Ativação Permanente
+                </CardTitle>
+              </div>
+              <span className="text-xs text-slate-400 hidden sm:inline">
+                Uso único • Hash SHA-256 no banco • Vitalício sem mensalidade
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-6 space-y-4">
+            <form onSubmit={handleGenerateTokens} className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+              <div className="sm:col-span-3">
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Quantidade a Gerar
+                </label>
+                <select
+                  value={tokenQty}
+                  onChange={(e) => setTokenQty(Number(e.target.value))}
+                  className="w-full h-10 px-3 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value={1}>1 Token Único</option>
+                  <option value={3}>3 Tokens</option>
+                  <option value={5}>5 Tokens</option>
+                  <option value={10}>10 Tokens (Lote)</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-6">
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Observação / Destino (Opcional)
+                </label>
+                <Input
+                  type="text"
+                  placeholder="Ex: Venda Pr. Carlos - Igreja Batista Central"
+                  value={tokenNote}
+                  onChange={(e) => setTokenNote(e.target.value)}
+                  className="bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500 h-10"
+                />
+              </div>
+
+              <div className="sm:col-span-3">
+                <button
+                  type="submit"
+                  disabled={generating}
+                  className="w-full h-10 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+                >
+                  {generating ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  <span>Gerar Token(s)</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Tokens recém-gerados com destaque de cópia imediata */}
+            {lastGenerated.length > 0 && (
+              <div className="mt-4 p-4 rounded-xl bg-blue-950/40 border border-blue-800/80 space-y-3 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-blue-300">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    <span>
+                      {lastGenerated.length === 1
+                        ? 'Token Permanente Gerado com Sucesso! Copie para enviar ao cliente:'
+                        : `${lastGenerated.length} Tokens Gerados com Sucesso! Copie abaixo:`}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLastGenerated([])}
+                    className="text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
+                  >
+                    Ocultar
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {lastGenerated.map((t) => {
+                    const isCopied = copiedToken === t.token_code;
+                    return (
+                      <div
+                        key={t.id}
+                        className="flex items-center justify-between p-3 rounded-lg bg-slate-900 border border-blue-700/60 shadow-xs"
+                      >
+                        <div>
+                          <span className="font-mono text-sm font-bold text-white tracking-wider block">
+                            {t.token_code}
+                          </span>
+                          <span className="text-[10px] text-blue-400">
+                            Disponível para ativação permanente
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCode(t.token_code)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                            isCopied
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs'
+                          }`}
+                        >
+                          {isCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                          <span>{isCopied ? 'Copiado!' : 'Copiar'}</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* NAVEGAÇÃO DE ABAS */}
+        <div className="flex border-b border-slate-800 gap-2">
+          <button
+            onClick={() => setActiveTab('tokens')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition-all cursor-pointer ${
+              activeTab === 'tokens'
+                ? 'border-blue-500 text-blue-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Key className="h-4 w-4" />
+            <span>Tokens de Ativação ({tokens.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('churches')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition-all cursor-pointer ${
+              activeTab === 'churches'
+                ? 'border-blue-500 text-blue-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Church className="h-4 w-4" />
+            <span>Igrejas & Licenças ({churches.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition-all cursor-pointer ${
+              activeTab === 'logs'
+                ? 'border-blue-500 text-blue-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <History className="h-4 w-4" />
+            <span>Auditoria & Histórico ({logs.length})</span>
+          </button>
+        </div>
+
+        {/* ======================================================== */}
+        {/* ABA 1: TOKENS DE ATIVAÇÃO                                */}
+        {/* ======================================================== */}
+        {activeTab === 'tokens' && (
+          <div className="space-y-4">
+            {/* Barra de Filtros de Tokens */}
+            <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+              <div className="relative w-full sm:w-72">
+                <Search className="h-4 w-4 absolute left-3 top-3 text-slate-400" />
+                <Input
+                  type="text"
+                  placeholder="Buscar token ou igreja..."
+                  value={tokenSearch}
+                  onChange={(e) => setTokenSearch(e.target.value)}
+                  className="pl-9 bg-slate-900 border-slate-800 text-slate-100 text-xs h-9"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1">
+                {(['todos', 'disponivel', 'utilizado', 'revogado'] as const).map((filter) => {
+                  const labels = {
+                    todos: 'Todos',
+                    disponivel: 'Disponíveis',
+                    utilizado: 'Utilizados',
+                    revogado: 'Revogados',
+                  };
+                  return (
+                    <button
+                      key={filter}
+                      onClick={() => setTokenFilter(filter)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                        tokenFilter === filter
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      {labels[filter]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Tabela de Tokens */}
+            <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 font-semibold">
+                    <tr>
+                      <th className="py-3 px-4">Código do Token</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Criado em</th>
+                      <th className="py-3 px-4">Igreja Vinculada</th>
+                      <th className="py-3 px-4">Data de Ativação</th>
+                      <th className="py-3 px-4">Observações</th>
+                      <th className="py-3 px-4 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {filteredTokens.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="text-center py-8 text-slate-500">
+                          Nenhum token encontrado com os filtros selecionados.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredTokens.map((t) => {
+                        const isCopied = copiedToken === t.token_code;
+                        return (
+                          <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="py-3 px-4 font-mono font-bold text-white text-sm">
+                              {t.token_code}
+                            </td>
+                            <td className="py-3 px-4">
+                              {t.status === 'disponivel' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                                  Disponível
+                                </span>
+                              )}
+                              {t.status === 'utilizado' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Utilizado
+                                </span>
+                              )}
+                              {t.status === 'revogado' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                                  <XCircle className="h-3 w-3" />
+                                  Revogado
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-slate-400">{formatDate(t.created_at)}</td>
+                            <td className="py-3 px-4">
+                              {t.activated_by_igreja ? (
+                                <div>
+                                  <span className="font-semibold text-white block">
+                                    {t.activated_by_igreja}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400 block">
+                                    {t.activated_by_email}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-500 italic">Não ativado</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-slate-400">{formatDate(t.activated_at)}</td>
+                            <td className="py-3 px-4 text-slate-400 max-w-xs truncate">
+                              {t.observacoes || '—'}
+                            </td>
+                            <td className="py-3 px-4 text-right space-x-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleCopyCode(t.token_code)}
+                                className="p-1.5 rounded-md hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer inline-flex items-center gap-1 text-xs"
+                                title="Copiar Token"
+                              >
+                                {isCopied ? (
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+
+                              {t.status === 'disponivel' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmRevokeToken(t)}
+                                  className="p-1.5 rounded-md hover:bg-rose-950 text-rose-400 hover:text-rose-300 cursor-pointer inline-flex items-center gap-1 text-xs"
+                                  title="Revogar Token"
+                                >
+                                  <XCircle className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* ABA 2: IGREJAS & LICENÇAS                                */}
+        {/* ======================================================== */}
+        {activeTab === 'churches' && (
+          <div className="space-y-4">
+            {/* Busca */}
+            <div className="flex items-center justify-between">
+              <div className="relative w-full sm:w-80">
+                <Search className="h-4 w-4 absolute left-3 top-3 text-slate-400" />
+                <Input
+                  type="text"
+                  placeholder="Buscar igreja, pastor ou email..."
+                  value={churchSearch}
+                  onChange={(e) => setChurchSearch(e.target.value)}
+                  className="pl-9 bg-slate-900 border-slate-800 text-slate-100 text-xs h-9"
+                />
+              </div>
+            </div>
+
+            {/* Tabela de Igrejas */}
+            <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 font-semibold">
+                    <tr>
+                      <th className="py-3 px-4">Comunidade / Igreja</th>
+                      <th className="py-3 px-4">Responsável & Email</th>
+                      <th className="py-3 px-4">Status da Licença</th>
+                      <th className="py-3 px-4">Início do Teste</th>
+                      <th className="py-3 px-4">Vencimento / Restante</th>
+                      <th className="py-3 px-4">Token Ativado</th>
+                      <th className="py-3 px-4 text-right">Ações de Gestão</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {filteredChurches.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="text-center py-8 text-slate-500">
+                          Nenhuma igreja cadastrada no sistema ainda.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredChurches.map((c) => {
+                        const daysRemaining = calculateDaysRemaining(c.trial_end);
+                        return (
+                          <tr key={c.id} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-2">
+                                <Church className="h-4 w-4 text-blue-400 shrink-0" />
+                                <span className="font-semibold text-white text-sm">
+                                  {c.igreja_nome}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="text-white block font-medium">
+                                {c.responsavel_nome || 'Pastor(a)'} ({c.cargo || 'Liderança'})
+                              </span>
+                              <span className="text-[11px] text-slate-400 block">{c.email}</span>
+                            </td>
+                            <td className="py-3 px-4">
+                              {c.status === 'active' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Licença Vitalícia
+                                </span>
+                              )}
+                              {c.status === 'trial' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                  <Clock className="h-3 w-3" />
+                                  Teste ({daysRemaining} dias restam)
+                                </span>
+                              )}
+                              {c.status === 'trial_expired' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  Teste Expirado
+                                </span>
+                              )}
+                              {c.status === 'revoked' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-red-950 text-red-400 border border-red-800">
+                                  <XCircle className="h-3 w-3" />
+                                  Acesso Revogado
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-slate-400">{formatDate(c.trial_start)}</td>
+                            <td className="py-3 px-4">
+                              {c.status === 'active' ? (
+                                <span className="text-emerald-400 font-medium">Ilimitado / Vitalício</span>
+                              ) : (
+                                <div>
+                                  <span className="text-slate-300 block">{formatDate(c.trial_end)}</span>
+                                  {c.status === 'trial' && (
+                                    <span className="text-[10px] text-amber-400">
+                                      {daysRemaining === 0 ? 'Expira hoje!' : `${daysRemaining} dia(s) restantes`}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 font-mono text-slate-300">
+                              {c.token_code ? (
+                                <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs">
+                                  {c.token_code}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500 italic">Nenhum</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right space-x-1.5">
+                              {c.status !== 'active' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleActivateChurch(c.id)}
+                                  className="px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition-colors cursor-pointer"
+                                  title="Conceder Licença Permanente sem Token"
+                                >
+                                  Ativar Permanente
+                                </button>
+                              )}
+
+                              {c.status !== 'revoked' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmRevokeChurch(c)}
+                                  className="px-2.5 py-1 rounded bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 text-xs font-semibold transition-colors cursor-pointer"
+                                  title="Revogar Acesso"
+                                >
+                                  Revogar
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleActivateChurch(c.id)}
+                                  className="px-2.5 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 text-xs font-semibold transition-colors cursor-pointer"
+                                  title="Reativar Acesso"
+                                >
+                                  Reativar
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* ABA 3: AUDITORIA & HISTÓRICO                            */}
+        {/* ======================================================== */}
+        {activeTab === 'logs' && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 font-semibold">
+                    <tr>
+                      <th className="py-3 px-4">Data & Hora</th>
+                      <th className="py-3 px-4">Operação</th>
+                      <th className="py-3 px-4">Descrição da Atividade</th>
+                      <th className="py-3 px-4">Igreja / E-mail</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {logs.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="text-center py-8 text-slate-500">
+                          Nenhum registro de atividade ainda.
+                        </td>
+                      </tr>
+                    ) : (
+                      logs.map((log) => (
+                        <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="py-3 px-4 text-slate-400 font-mono text-[11px] whitespace-nowrap">
+                            {formatDate(log.created_at)}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700">
+                              {log.tipo.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-white font-medium">{log.descricao}</td>
+                          <td className="py-3 px-4 text-slate-400">
+                            {log.igreja_nome ? (
+                              <span className="text-blue-300">{log.igreja_nome}</span>
+                            ) : log.user_email ? (
+                              log.user_email
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* MODAL DE CONFIRMAÇÃO: REVOGAR IGREJA */}
+      {confirmRevokeChurch && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-rose-400">
+              <div className="h-10 w-10 rounded-full bg-rose-950 flex items-center justify-center border border-rose-800">
+                <AlertTriangle className="h-6 w-6 text-rose-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Confirmar Revogação</h3>
+                <p className="text-xs text-rose-300">Operação administrativa sensível</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Tem certeza que deseja revogar o acesso da igreja{' '}
+              <strong className="text-white">"{confirmRevokeChurch.igreja_nome}"</strong> (
+              {confirmRevokeChurch.email})? As funcionalidades protegidas serão bloqueadas até a
+              reativação ou nova licença, mas os dados permanecerão preservados.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmRevokeChurch(null)}
+                className="text-xs border-slate-700 text-slate-300"
+              >
+                Cancelar
+              </Button>
+              <button
+                type="button"
+                onClick={() => handleRevokeChurch(confirmRevokeChurch.id)}
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition-colors cursor-pointer shadow-md"
+              >
+                Sim, Revogar Acesso
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO: REVOGAR TOKEN */}
+      {confirmRevokeToken && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-rose-400">
+              <div className="h-10 w-10 rounded-full bg-rose-950 flex items-center justify-center border border-rose-800">
+                <XCircle className="h-6 w-6 text-rose-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Revogar Token</h3>
+                <p className="text-xs text-rose-300">Invalidar código de ativação</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Deseja invalidar permanentemente o token{' '}
+              <strong className="text-white font-mono">{confirmRevokeToken.token_code}</strong>? Ele
+              não poderá mais ser utilizado por nenhuma igreja para ativação.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmRevokeToken(null)}
+                className="text-xs border-slate-700 text-slate-300"
+              >
+                Cancelar
+              </Button>
+              <button
+                type="button"
+                onClick={() => handleRevokeToken(confirmRevokeToken.id)}
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition-colors cursor-pointer shadow-md"
+              >
+                Revogar Token
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -53,3 +53,17 @@ export interface UserSession {
   cargo: string;
   igreja: string;
 }
+
+export type LicenseStatus = 'trial' | 'trial_expired' | 'active' | 'revoked';
+
+export interface ChurchLicense {
+  status: LicenseStatus;
+  daysRemaining: number;
+  trialStart?: string;
+  trialEnd?: string;
+  activatedAt?: string;
+  tokenCode?: string;
+  igrejaNome?: string;
+  email?: string;
+}
+
