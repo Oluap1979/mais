@@ -44,6 +44,7 @@ export function SecretariaView({
   const [isOpenModal, setIsOpenModal] = useState(false);
   const [isOpenConfigModal, setIsOpenConfigModal] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocumentoSecretaria | null>(null);
+  const [autoPrintSelected, setAutoPrintSelected] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [headerConfig, setHeaderConfig] = useState<IgrejaHeaderConfig>(() =>
     getSavedHeaderConfig(user?.igreja, user?.nome, user?.cargo)
@@ -380,7 +381,10 @@ export function SecretariaView({
 
                 <div className="border-t border-gray-100 bg-gray-50/80 px-5 py-3 flex items-center justify-between">
                   <button
-                    onClick={() => setSelectedDoc(doc)}
+                    onClick={() => {
+                      setAutoPrintSelected(false);
+                      setSelectedDoc(doc);
+                    }}
                     className="inline-flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-900 font-bold cursor-pointer"
                   >
                     <Eye className="h-3.5 w-3.5" />
@@ -390,11 +394,11 @@ export function SecretariaView({
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => {
+                        setAutoPrintSelected(true);
                         setSelectedDoc(doc);
-                        setTimeout(() => window.print(), 350);
                       }}
                       className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                      title="Imprimir / Salvar PDF"
+                      title="Imprimir / Salvar PDF Oficial"
                     >
                       <Printer className="h-4 w-4" />
                     </button>
@@ -520,8 +524,12 @@ export function SecretariaView({
         <DocumentoOficial
           documento={selectedDoc}
           user={user || null}
-          onClose={() => setSelectedDoc(null)}
+          onClose={() => {
+            setSelectedDoc(null);
+            setAutoPrintSelected(false);
+          }}
           onUpdateConteudo={handleUpdateConteudoViewer}
+          autoPrint={autoPrintSelected}
         />
       )}
 
