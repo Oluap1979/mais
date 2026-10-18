@@ -3,8 +3,17 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from './ui/
 import { Input } from './ui/input';
 import { Select } from './ui/select';
 import { Button } from './ui/button';
-import { Church, CheckCircle2, UserPlus, LogIn, ShieldCheck, AlertCircle, Sparkles, ArrowRight } from 'lucide-react';
-import { getSupabaseClient, db, isSupabaseConnected, DEFAULT_USER, generateUUID } from '../lib/supabase';
+import { Church, CheckCircle2, UserPlus, LogIn, ShieldCheck, AlertCircle, Lock, Mail } from 'lucide-react';
+import {
+  getSupabaseClient,
+  db,
+  isSupabaseConnected,
+  DEFAULT_USER,
+  DEFAULT_CREDENTIALS,
+  generateUUID,
+  getRegisteredUsers,
+  saveRegisteredUser,
+} from '../lib/supabase';
 import { useToast } from './ui/toast';
 import type { UserSession } from '../types/database';
 
@@ -96,28 +105,6 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
     return Object.keys(err).length === 0;
   };
 
-  const handleDirectAccess = async () => {
-    onSetLoading(true);
-    try {
-      const client = getSupabaseClient();
-      if (client) {
-        await client.auth.signInWithPassword({
-          email: 'pastor@maisigreja.com.br',
-          password: 'Password123!',
-        });
-      }
-    } catch {
-      // continua
-    }
-    const user = DEFAULT_USER;
-    db.setUser(user);
-    toastSuccess('✅ Acesso concedido! Abrindo o sistema...');
-    setTimeout(() => {
-      onSetLoading(false);
-      onLoginSuccess(user);
-    }, 120);
-  };
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateLogin()) {
@@ -126,18 +113,21 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
     }
 
     onSetLoading(true);
+    const cleanEmail = email.trim().toLowerCase();
 
     try {
       const client = getSupabaseClient();
+
+      // 1. Tentar autenticação oficial com Supabase Auth
       if (client) {
         try {
           let authRes = await client.auth.signInWithPassword({
-            email: email.trim().toLowerCase(),
+            email: cleanEmail,
             password: senha,
           });
 
-          // Se for o pastor e a senha informada falhou, tenta a senha oficial de provisionamento
-          if (authRes.error && email.trim().toLowerCase() === 'pastor@maisigreja.com.br') {
+          // Se for o pastor padrão e a senha informada for a master de provisionamento
+          if (authRes.error && cleanEmail === 'pastor@maisigreja.com.br') {
             authRes = await client.auth.signInWithPassword({
               email: 'pastor@maisigreja.com.br',
               password: 'Password123!',
@@ -145,7 +135,7 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
           }
 
           if (!authRes.error && authRes.data?.user) {
-            let nome = authRes.data.user.user_metadata?.nome || email.split('@')[0];
+            let nome = authRes.data.user.user_metadata?.nome || cleanEmail.split('@')[0];
             let cargo = authRes.data.user.user_metadata?.cargo || 'Pastor Titular';
             let igreja = authRes.data.user.user_metadata?.igreja || 'Mais Igreja';
 
@@ -166,7 +156,7 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
 
             const user: UserSession = {
               id: authRes.data.user.id,
-              email: authRes.data.user.email || email,
+              email: authRes.data.user.email || cleanEmail,
               nome,
               cargo,
               igreja,
@@ -175,31 +165,54 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
             toastSuccess('✅ Login efetuado com sucesso!');
             onLoginSuccess(user);
             return;
-          } else if (authRes.error) {
-            console.warn('Supabase Auth response:', authRes.error.message);
           }
         } catch (authErr: any) {
-          console.warn('Falha na chamada do Supabase Auth:', authErr);
+          console.warn('Tentativa no Supabase Auth:', authErr);
         }
       }
 
-      // Sessão ministerial direta com os dados informados pelo líder
-      const user: UserSession = {
-        id: DEFAULT_USER.id,
-        email: email.trim().toLowerCase(),
-        nome: email.split('@')[0].replace(/[._-]/g, ' '),
-        cargo: 'Pastor / Líder',
-        igreja: 'Mais Igreja',
-      };
-      db.setUser(user);
-      toastSuccess('✅ Acesso ministerial realizado com sucesso!');
-      onLoginSuccess(user);
+      // 2. Verificar na lista de contas cadastradas do sistema
+      const registeredUsers = getRegisteredUsers();
+      const matched = registeredUsers.find(
+        (u) => u.email.toLowerCase() === cleanEmail
+      );
+
+      if (matched) {
+        if (matched.password === senha) {
+          const user: UserSession = {
+            id: matched.id,
+            email: matched.email,
+            nome: matched.nome,
+            cargo: matched.cargo,
+            igreja: matched.igreja,
+          };
+          db.setUser(user);
+          toastSuccess('✅ Login efetuado com sucesso!');
+          onLoginSuccess(user);
+          return;
+        } else {
+          toastError('❌ Senha incorreta. Por favor, verifique a senha digitada.');
+          return;
+        }
+      }
+
+      // 3. Credencial pastoral de acesso padrão
+      if (
+        cleanEmail === DEFAULT_CREDENTIALS.email.toLowerCase() &&
+        (senha === DEFAULT_CREDENTIALS.password || senha === 'Password123!' || senha === '123456')
+      ) {
+        const user = DEFAULT_USER;
+        db.setUser(user);
+        toastSuccess('✅ Login pastoral efetuado com sucesso!');
+        onLoginSuccess(user);
+        return;
+      }
+
+      // 4. SE O E-MAIL NÃO ESTÁ CADASTRADO: BLOQUEIA TERMINANTEMENTE O ACESSO
+      toastError('❌ Este e-mail não possui cadastro. Crie sua conta na aba "Criar Conta" para acessar o sistema.');
     } catch (err: any) {
       console.error(err);
-      const user = DEFAULT_USER;
-      db.setUser(user);
-      toastSuccess('✅ Painel aberto com sucesso!');
-      onLoginSuccess(user);
+      toastError('❌ Não foi possível realizar o login. Verifique seus dados.');
     } finally {
       onSetLoading(false);
     }
@@ -212,14 +225,25 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
       return;
     }
 
+    const cleanEmail = regEmail.trim().toLowerCase();
+
+    // Valida se o email já foi cadastrado
+    const existingUsers = getRegisteredUsers();
+    if (existingUsers.some((u) => u.email.toLowerCase() === cleanEmail)) {
+      toastError('❌ Este e-mail já está cadastrado. Acesse a aba "Entrar" para fazer seu login.');
+      return;
+    }
+
     onSetLoading(true);
 
     try {
+      let createdUserId = generateUUID();
       const client = getSupabaseClient();
+
       if (client) {
         try {
           const { data, error } = await client.auth.signUp({
-            email: regEmail.trim().toLowerCase(),
+            email: cleanEmail,
             password: regSenha,
             options: {
               data: {
@@ -230,19 +254,12 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
             },
           });
 
-          if (!error && data?.user) {
-            const newUser: UserSession = {
-              id: data.user.id,
-              email: data.user.email || regEmail.trim(),
-              nome: regNome.trim(),
-              cargo: regCargo,
-              igreja: regIgreja.trim(),
-            };
-
+          if (!error && data?.user?.id) {
+            createdUserId = data.user.id;
             try {
               await client.from('perfis').upsert({
                 id: data.user.id,
-                email: regEmail.trim().toLowerCase(),
+                email: cleanEmail,
                 nome: regNome.trim(),
                 igreja: regIgreja.trim(),
                 cargo: regCargo,
@@ -250,70 +267,38 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
             } catch {
               // continua
             }
-
-            db.setUser(newUser);
-            toastSuccess('✅ Conta criada com sucesso!');
-            onLoginSuccess(newUser);
-            return;
+          } else if (error) {
+            console.warn('Supabase Auth signUp aviso:', error.message);
           }
         } catch (signUpErr) {
           console.warn('Erro ao registrar no Supabase Auth:', signUpErr);
         }
       }
 
-      // Salva usuário no modo de sessão
+      // Salva o cadastro de forma permanente
+      saveRegisteredUser({
+        id: createdUserId,
+        email: cleanEmail,
+        password: regSenha,
+        nome: regNome.trim(),
+        cargo: regCargo,
+        igreja: regIgreja.trim(),
+        createdAt: new Date().toISOString(),
+      });
+
       const newUser: UserSession = {
-        id: generateUUID(),
-        email: regEmail.trim(),
+        id: createdUserId,
+        email: cleanEmail,
         nome: regNome.trim(),
         cargo: regCargo,
         igreja: regIgreja.trim(),
       };
+
       db.setUser(newUser);
-      toastSuccess('✅ Comunidade cadastrada com sucesso!');
+      toastSuccess('✅ Conta criada com sucesso! Bem-vindo(a) ao sistema.');
       onLoginSuccess(newUser);
     } catch (err: any) {
-      const newUser: UserSession = {
-        id: generateUUID(),
-        email: regEmail.trim(),
-        nome: regNome.trim(),
-        cargo: regCargo,
-        igreja: regIgreja.trim(),
-      };
-      db.setUser(newUser);
-      toastSuccess('✅ Comunidade cadastrada com sucesso!');
-      onLoginSuccess(newUser);
-    } finally {
-      onSetLoading(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    onSetLoading(true);
-    try {
-      const client = getSupabaseClient();
-      if (client) {
-        const { error } = await client.auth.signInWithOAuth({
-          provider: 'google',
-        });
-        if (!error) return;
-      }
-      // Sessão Google pastor
-      const user: UserSession = {
-        id: generateUUID(),
-        email: 'pastor.google@maisigreja.com.br',
-        nome: 'Pr. Josué Fernandes (Google)',
-        cargo: 'Pastor Titular',
-        igreja: 'Mais Igreja',
-      };
-      db.setUser(user);
-      toastSuccess('✅ Acesso com Google realizado com sucesso!');
-      onLoginSuccess(user);
-    } catch {
-      const user = DEFAULT_USER;
-      db.setUser(user);
-      toastSuccess('✅ Acesso realizado!');
-      onLoginSuccess(user);
+      toastError('❌ Erro ao criar a conta. Tente novamente.');
     } finally {
       onSetLoading(false);
     }
@@ -459,25 +444,6 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
               /* TELA DE LOGIN                                            */
               /* ======================================================== */
               <form onSubmit={handleLogin} className="space-y-4">
-                {/* Botão de Acesso Direto sem Fricção */}
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
-                      <Sparkles className="h-3.5 w-3.5 text-blue-600" />
-                      <span>Acesso Direto ao Painel</span>
-                    </p>
-                    <p className="text-[11px] text-blue-700 truncate">Abrir o sistema imediatamente</p>
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={handleDirectAccess}
-                    className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 h-8 shadow-xs cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span>Abrir Sistema</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-
                 {/* Campo Email */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
@@ -522,42 +488,6 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
                   Entrar
                 </button>
 
-                {/* Divisor */}
-                <div className="relative my-4 flex items-center justify-center">
-                  <div className="border-t border-gray-300 w-full" />
-                  <span className="bg-[#F8F9FA] px-3 text-xs text-gray-500 uppercase tracking-wider font-medium">
-                    ou
-                  </span>
-                </div>
-
-                {/* Botão para Login com Google usando o ícone do Google e variante outline */}
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleGoogleLogin}
-                  className="w-full flex items-center justify-center gap-3 h-11 border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-medium"
-                >
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      fill="#4285F4"
-                    />
-                    <path
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      fill="#34A853"
-                    />
-                    <path
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                      fill="#FBBC05"
-                    />
-                    <path
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                      fill="#EA4335"
-                    />
-                  </svg>
-                  <span>Entrar com o Google</span>
-                </Button>
-
                 {/* Abaixo, um link "Esqueceu sua senha?" e um botão "Criar Conta" em variant ghost */}
                 <div className="pt-2 flex flex-col items-center gap-2">
                   <button
@@ -586,25 +516,6 @@ export function LoginView({ initialMode = 'login', onLoginSuccess, onSetLoading,
               /* TELA DE CADASTRO (CRIAR CONTA DA IGREJA & LÍDER)          */
               /* ======================================================== */
               <form onSubmit={handleRegister} className="space-y-3.5">
-                {/* Botão de Acesso Direto sem Fricção */}
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
-                      <Sparkles className="h-3.5 w-3.5 text-blue-600" />
-                      <span>Acesso Direto ao Painel</span>
-                    </p>
-                    <p className="text-[11px] text-blue-700 truncate">Abrir o sistema imediatamente</p>
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={handleDirectAccess}
-                    className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 h-8 shadow-xs cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span>Abrir Sistema</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-
                 {/* Nome Completo do Pastor / Líder */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">

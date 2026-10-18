@@ -10,7 +10,44 @@ export const STORAGE_KEYS = {
   SECRETARIA: 'mais_igreja_secretaria',
   SUPABASE_URL: 'mais_igreja_supabase_url',
   SUPABASE_KEY: 'mais_igreja_supabase_anon_key',
+  REGISTERED_USERS: 'mais_igreja_registered_users',
 };
+
+export interface RegisteredAccount {
+  id: string;
+  email: string;
+  password: string;
+  nome: string;
+  cargo: string;
+  igreja: string;
+  createdAt: string;
+}
+
+export function getRegisteredUsers(): RegisteredAccount[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_USERS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export function saveRegisteredUser(account: RegisteredAccount): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const existing = getRegisteredUsers();
+    const filtered = existing.filter((u) => u.email.toLowerCase() !== account.email.toLowerCase());
+    filtered.push(account);
+    localStorage.setItem(STORAGE_KEYS.REGISTERED_USERS, JSON.stringify(filtered));
+  } catch (err) {
+    console.error('Erro ao salvar conta registrada:', err);
+  }
+}
 
 // Validador de formato UUID v4
 export function isValidUUID(id: string | null | undefined): boolean {
