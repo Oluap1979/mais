@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Printer,
   X,
@@ -232,7 +233,7 @@ export function DocumentoOficial({
         .filter((p) => p.length > 0)
     : [];
 
-  return (
+  const modalContent = (
     <div className="documento-modal-overlay fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-start p-2 sm:p-6 print:p-0 print:bg-white print:static print:overflow-visible">
       
       {/* ========================================================= */}
@@ -1103,7 +1104,7 @@ export function DocumentoOficial({
               {/* Cabeçalho Timbrado */}
               {config.estiloCabecalho === 'centralizado' ? (
                 /* Cabeçalho Centralizado Solene */
-                <header className="documento-cabecalho text-center border-b-2 pb-4 mb-6" style={{ borderColor: colors.primary }}>
+                <div className="documento-cabecalho print-header text-center border-b-2 pb-4 mb-6" style={{ borderColor: colors.primary }}>
                   <div className="flex justify-center mb-2">
                     {config.logoUrl && logoLoadStatus === 'success' ? (
                       <img
@@ -1147,10 +1148,10 @@ export function DocumentoOficial({
                   <p className="text-[9px] text-slate-500 mt-0.5">
                     {config.cnpj ? `CNPJ: ${config.cnpj} • ` : ''}Tel: {config.telefone} &bull; {config.email}
                   </p>
-                </header>
+                </div>
               ) : (
                 /* Cabeçalho Moderno Executivo */
-                <header className="documento-cabecalho border-b-2 pb-4 mb-6" style={{ borderColor: colors.primary }}>
+                <div className="documento-cabecalho print-header border-b-2 pb-4 mb-6" style={{ borderColor: colors.primary }}>
                   <div className="flex items-start justify-between gap-4">
                     {/* Esquerda: Logo + Dados da Congregação */}
                     <div className="flex items-center gap-3.5">
@@ -1213,7 +1214,7 @@ export function DocumentoOficial({
                       </p>
                     </div>
                   </div>
-                </header>
+                </div>
               )}
 
               {/* Título Principal do Documento */}
@@ -1308,4 +1309,7 @@ export function DocumentoOficial({
       </main>
     </div>
   );
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(modalContent, document.body);
 }
