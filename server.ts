@@ -568,18 +568,9 @@ async function startServer() {
     );
 
     if (!tokenRec) {
-      // Se tiver formato MI e comprimento razoável, é um token autêntico válido
-      if (cleanToken.startsWith('MI-') && cleanToken.length >= 8) {
-        return res.json({
-          valid: true,
-          status: 'disponivel',
-          token_code: cleanToken,
-          message: 'Token autêntico e válido para ativação permanente.',
-        });
-      }
       return res.status(404).json({
         valid: false,
-        error: 'Token não localizado. Verifique se digitou o código completo.',
+        error: 'Token não localizado. Apenas tokens gerados no painel de administração são válidos.',
       });
     }
 
@@ -627,29 +618,16 @@ async function startServer() {
 
     const store = ensureDataStore();
 
-    // 1. Busca o token no banco de tokens ou aceita se for formato válido MI-
+    // 1. Busca estrita do token no banco de tokens do admin
     let tokenRec = store.tokens.find(
       (t) => normalizeToken(t.token_code) === cleanToken || t.token_hash === incomingHash
     );
 
     if (!tokenRec) {
-      if (cleanToken.startsWith('MI-') && cleanToken.length >= 10) {
-        // Cria o token automaticamente no store para aceitar a ativação
-        tokenRec = {
-          id: crypto.randomUUID(),
-          token_code: cleanToken,
-          token_hash: incomingHash,
-          status: 'disponivel',
-          created_at: new Date().toISOString(),
-          created_by: 'system',
-        };
-        store.tokens.unshift(tokenRec);
-      } else {
-        return res.status(404).json({
-          error: 'Token inválido. Verifique o código digitado e tente novamente.',
-          code: 'TOKEN_NOT_FOUND',
-        });
-      }
+      return res.status(404).json({
+        error: 'Token inválido ou não gerado no painel de administração. Verifique o código digitado.',
+        code: 'TOKEN_NOT_FOUND',
+      });
     }
 
     if (tokenRec.status === 'revogado') {

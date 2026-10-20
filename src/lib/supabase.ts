@@ -496,12 +496,9 @@ export const db = {
       if (res.ok && data.valid) {
         return { valid: true, message: data.message || 'Token válido para ativação permanente.', status: data.status };
       }
-      return { valid: false, message: data.error || 'Token inválido', error: data.error, status: data.status };
-    } catch {
-      if (cleanToken.startsWith('MI-') && cleanToken.length >= 8) {
-        return { valid: true, message: 'Formato de token válido para ativação permanente!', status: 'disponivel' };
-      }
-      return { valid: false, message: 'Formato de token inválido.' };
+      return { valid: false, message: data.error || 'Token inválido ou não encontrado.', error: data.error, status: data.status };
+    } catch (err: any) {
+      return { valid: false, message: 'Erro ao validar token no servidor.' };
     }
   },
 
@@ -517,49 +514,26 @@ export const db = {
     const cleanToken = (data.token || '').replace(/\s+/g, '').toUpperCase();
     const payload = { ...data, token: cleanToken };
 
-    try {
-      const res = await fetch('/api/license/activate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (res.ok && json.success) {
-        const lic: ChurchLicense = {
-          status: 'active',
-          daysRemaining: 0,
-          activatedAt: new Date().toISOString(),
-          tokenCode: cleanToken,
-          igrejaNome: data.igreja_nome,
-          email: data.email,
-        };
-        localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
-        return json;
-      } else if (!res.ok && json.error) {
-        throw new Error(json.error);
-      }
-    } catch (err: any) {
-      // Se for erro de validação específico retornado pelo servidor, propaga
-      if (err.message && (err.message.includes('revogado') || err.message.includes('utilizado'))) {
-        throw err;
-      }
+    const res = await fetch('/api/license/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (res.ok && json.success) {
+      const lic: ChurchLicense = {
+        status: 'active',
+        daysRemaining: 0,
+        activatedAt: new Date().toISOString(),
+        tokenCode: cleanToken,
+        igrejaNome: data.igreja_nome,
+        email: data.email,
+      };
+      localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
+      return json;
+    } else {
+      throw new Error(json.error || 'Token inválido ou não gerado no painel de administração.');
     }
-
-    // Fallback local garantido se o formato for válido
-    const lic: ChurchLicense = {
-      status: 'active',
-      daysRemaining: 0,
-      activatedAt: new Date().toISOString(),
-      tokenCode: cleanToken,
-      igrejaNome: data.igreja_nome,
-      email: data.email,
-    };
-    localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
-    return {
-      success: true,
-      status: 'active',
-      message: 'Licença permanente vitalícia ativada com sucesso!',
-    };
   },
 
   // Retorna APENAS as células reais do Supabase
