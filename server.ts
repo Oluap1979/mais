@@ -771,9 +771,41 @@ async function startServer() {
       saveStore(store);
     }
 
-    const church = store.churches.find(
+    let church = store.churches.find(
       (c) => (email && c.email.toLowerCase() === email) || (userId && c.user_id === userId)
     );
+
+    // Se encontrou por e-mail mas o userId mudou/novo, atualiza o vínculo
+    if (church && userId && !church.user_id) {
+      church.user_id = userId;
+      church.updated_at = new Date().toISOString();
+      saveStore(store);
+    }
+
+    // Se não encontrou em churches, mas o e-mail consta nos tokens utilizados na central, restaura o acesso permanente
+    if (!church && email) {
+      const usedToken = store.tokens.find(
+        (t) => t.status === 'utilizado' && t.activated_by_email?.toLowerCase() === email
+      );
+      if (usedToken) {
+        church = {
+          id: crypto.randomUUID(),
+          user_id: userId || undefined,
+          igreja_nome: usedToken.activated_by_igreja || 'Igreja',
+          email: email,
+          status: 'active',
+          trial_start: usedToken.created_at,
+          trial_end: usedToken.created_at,
+          activated_at: usedToken.activated_at,
+          token_code: usedToken.token_code,
+          token_hash: usedToken.token_hash,
+          created_at: usedToken.created_at,
+          updated_at: new Date().toISOString(),
+        };
+        store.churches.push(church);
+        saveStore(store);
+      }
+    }
 
     if (!church) {
       return res.json({
