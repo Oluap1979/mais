@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   Users,
   Group,
@@ -11,6 +11,10 @@ import {
   BarChart3,
   ArrowDownRight,
   Wallet,
+  Pencil,
+  MapPin,
+  Clock,
+  Trash2,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -24,8 +28,10 @@ import {
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { formatCurrency, formatDate } from '../lib/utils';
-import type { Membro, Celula, RegistroFinanceiro } from '../types/database';
+import type { Membro, Celula, RegistroFinanceiro, AgendaItem } from '../types/database';
 import type { NavItemKey } from './Sidebar';
+import { AgendaModal } from './AgendaModal';
+import { db } from '../lib/supabase';
 
 interface DashboardViewProps {
   membros: Membro[];
@@ -36,6 +42,42 @@ interface DashboardViewProps {
   onOpenNovaCelula: () => void;
 }
 
+function getAgendaColorClasses(cor?: string) {
+  switch (cor) {
+    case 'green':
+      return {
+        box: 'border-emerald-200 bg-emerald-50/50 hover:bg-emerald-50',
+        badge: 'text-emerald-700 bg-emerald-100/70 border-emerald-200',
+      };
+    case 'indigo':
+      return {
+        box: 'border-indigo-200 bg-indigo-50/50 hover:bg-indigo-50',
+        badge: 'text-indigo-700 bg-indigo-100/70 border-indigo-200',
+      };
+    case 'purple':
+      return {
+        box: 'border-purple-200 bg-purple-50/50 hover:bg-purple-50',
+        badge: 'text-purple-700 bg-purple-100/70 border-purple-200',
+      };
+    case 'amber':
+      return {
+        box: 'border-amber-200 bg-amber-50/50 hover:bg-amber-50',
+        badge: 'text-amber-700 bg-amber-100/70 border-amber-200',
+      };
+    case 'rose':
+      return {
+        box: 'border-rose-200 bg-rose-50/50 hover:bg-rose-50',
+        badge: 'text-rose-700 bg-rose-100/70 border-rose-200',
+      };
+    case 'blue':
+    default:
+      return {
+        box: 'border-blue-200 bg-blue-50/50 hover:bg-blue-50',
+        badge: 'text-blue-700 bg-blue-100/70 border-blue-200',
+      };
+  }
+}
+
 export function DashboardView({
   membros,
   celulas,
@@ -44,6 +86,33 @@ export function DashboardView({
   onOpenNovoMembro,
   onOpenNovaCelula,
 }: DashboardViewProps) {
+  // Agenda Litúrgica & Comunitária
+  const [agenda, setAgenda] = useState<AgendaItem[]>([]);
+  const [modalAgendaOpen, setModalAgendaOpen] = useState(false);
+  const [editingAgendaItem, setEditingAgendaItem] = useState<AgendaItem | null>(null);
+
+  const loadAgenda = useCallback(async () => {
+    try {
+      const items = await db.getAgenda();
+      setAgenda(items);
+    } catch (e) {
+      console.warn('Erro ao carregar agenda:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAgenda();
+  }, [loadAgenda]);
+
+  const handleSaveAgenda = async (item: Partial<AgendaItem>) => {
+    await db.saveAgendaItem(item);
+    await loadAgenda();
+  };
+
+  const handleDeleteAgenda = async (id: string) => {
+    await db.deleteAgendaItem(id);
+    await loadAgenda();
+  };
   // Cálculos de Estatísticas
   const totalMembros = membros.length;
   const celulasAtivas = celulas.length;
@@ -171,6 +240,16 @@ export function DashboardView({
             >
               <Plus className="h-4 w-4 text-slate-300" />
               <span>Nova Célula</span>
+            </button>
+            <button
+              onClick={() => {
+                setEditingAgendaItem(null);
+                setModalAgendaOpen(true);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+            >
+              <Calendar className="h-4 w-4 text-blue-400" />
+              <span>Agendar Encontro</span>
             </button>
             <button
               onClick={() => onNavigate('financeiro')}
@@ -505,36 +584,129 @@ export function DashboardView({
         </Card>
       </div>
 
-      {/* Agenda Pastoral da Semana */}
+      {/* Agenda Litúrgica & Comunitária Dinâmica */}
       <Card className="rounded-xl border border-gray-200 bg-white p-6 shadow-xs">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="h-9 w-9 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
-            <Calendar className="h-5 w-5" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+              <Calendar className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-gray-900">Agenda Litúrgica & Comunitária</h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                  {agenda.length} {agenda.length === 1 ? 'encontro' : 'encontros'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">Programação dos próximos encontros e cultos da semana</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-base font-bold text-gray-900">Agenda Litúrgica & Comunitária</h3>
-            <p className="text-xs text-gray-500">Programação dos próximos encontros da semana</p>
-          </div>
+
+          <button
+            onClick={() => {
+              setEditingAgendaItem(null);
+              setModalAgendaOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer self-start sm:self-auto"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Novo Agendamento</span>
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-          <div className="p-3.5 rounded-lg border border-blue-100 bg-blue-50/40">
-            <span className="text-[11px] font-semibold text-blue-700 uppercase tracking-wide">Quarta-feira · 19h30</span>
-            <h4 className="font-bold text-gray-900 mt-1">Culto de Oração & Doutrina</h4>
-            <p className="text-xs text-gray-600 mt-0.5">Estudo bíblico expositivo no Templo Central.</p>
+        {agenda.length === 0 ? (
+          <div className="text-center py-8 border border-dashed border-gray-200 rounded-xl bg-gray-50/50 space-y-2">
+            <Calendar className="h-8 w-8 text-gray-400 mx-auto" />
+            <p className="text-xs text-gray-600 font-semibold">Nenhum culto ou agendamento cadastrado no momento.</p>
+            <button
+              onClick={() => {
+                setEditingAgendaItem(null);
+                setModalAgendaOpen(true);
+              }}
+              className="text-xs text-blue-600 font-bold hover:underline cursor-pointer"
+            >
+              + Adicionar primeiro agendamento
+            </button>
           </div>
-          <div className="p-3.5 rounded-lg border border-green-100 bg-green-50/40">
-            <span className="text-[11px] font-semibold text-green-700 uppercase tracking-wide">Quinta & Sexta · 20h00</span>
-            <h4 className="font-bold text-gray-900 mt-1">Encontro das Células</h4>
-            <p className="text-xs text-gray-600 mt-0.5">Reunião nos lares para estudo e comunhão.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+            {agenda.map((item) => {
+              const colorClasses = getAgendaColorClasses(item.cor);
+              return (
+                <div
+                  key={item.id}
+                  className={`p-4 rounded-xl border transition-all hover:shadow-xs group relative flex flex-col justify-between ${colorClasses.box}`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${colorClasses.badge}`}>
+                        <Clock className="h-3 w-3" />
+                        <span>{item.dia_horario}</span>
+                      </span>
+
+                      {/* Botões de Ação Rápida */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setEditingAgendaItem(item);
+                            setModalAgendaOpen(true);
+                          }}
+                          className="p-1.5 rounded-md bg-white/80 hover:bg-white text-gray-600 hover:text-blue-600 shadow-2xs border border-gray-200/60 transition-colors cursor-pointer"
+                          title="Editar Agendamento"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteAgenda(item.id)}
+                          className="p-1.5 rounded-md bg-white/80 hover:bg-white text-gray-400 hover:text-rose-600 shadow-2xs border border-gray-200/60 transition-colors cursor-pointer"
+                          title="Excluir Agendamento"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <h4 className="font-bold text-gray-900 text-sm leading-tight">{item.titulo}</h4>
+
+                    {item.local && (
+                      <p className="text-[11px] text-gray-600 flex items-center gap-1 mt-1 font-medium">
+                        <MapPin className="h-3 w-3 shrink-0 text-gray-400" />
+                        <span>{item.local}</span>
+                      </p>
+                    )}
+
+                    {item.descricao && (
+                      <p className="text-xs text-gray-600 mt-2 leading-relaxed">{item.descricao}</p>
+                    )}
+                  </div>
+
+                  <div className="mt-3 pt-2 border-t border-black/5 flex items-center justify-between">
+                    <span className="text-[10px] text-gray-500">Semanal</span>
+                    <button
+                      onClick={() => {
+                        setEditingAgendaItem(item);
+                        setModalAgendaOpen(true);
+                      }}
+                      className="text-[11px] font-semibold text-blue-700 hover:text-blue-900 cursor-pointer"
+                    >
+                      Editar detalhes →
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <div className="p-3.5 rounded-lg border border-indigo-100 bg-indigo-50/40">
-            <span className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wide">Domingo · 10h & 18h</span>
-            <h4 className="font-bold text-gray-900 mt-1">Culto de Celebração & Ceia</h4>
-            <p className="text-xs text-gray-600 mt-0.5">Louvor comunitário e ministração da Palavra.</p>
-          </div>
-        </div>
+        )}
       </Card>
+
+      {/* Modal de Agendamento */}
+      <AgendaModal
+        open={modalAgendaOpen}
+        onOpenChange={setModalAgendaOpen}
+        agendaItem={editingAgendaItem}
+        onSave={handleSaveAgenda}
+        onDelete={handleDeleteAgenda}
+      />
     </div>
   );
 }

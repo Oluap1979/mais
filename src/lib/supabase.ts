@@ -7,6 +7,7 @@ import type {
   UserSession,
   ChurchLicense,
   LicenseStatus,
+  AgendaItem,
 } from '../types/database';
 
 // Chaves de armazenamento Local
@@ -16,6 +17,7 @@ export const STORAGE_KEYS = {
   CELULAS: 'mais_igreja_celulas',
   FINANCEIRO: 'mais_igreja_financeiro',
   SECRETARIA: 'mais_igreja_secretaria',
+  AGENDA: 'mais_igreja_agenda',
   SUPABASE_URL: 'mais_igreja_supabase_url',
   SUPABASE_KEY: 'mais_igreja_supabase_anon_key',
   REGISTERED_USERS: 'mais_igreja_registered_users',
@@ -1281,4 +1283,86 @@ export const db = {
 
     return savedCount;
   },
+
+  // Agenda Litúrgica & Comunitária da Igreja
+  async getAgenda(): Promise<AgendaItem[]> {
+    if (typeof window === 'undefined') return DEFAULT_AGENDA;
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.AGENDA);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar agenda local:', e);
+    }
+    localStorage.setItem(STORAGE_KEYS.AGENDA, JSON.stringify(DEFAULT_AGENDA));
+    return DEFAULT_AGENDA;
+  },
+
+  async saveAgendaItem(item: Partial<AgendaItem>): Promise<AgendaItem> {
+    const current = await this.getAgenda();
+    let savedItem: AgendaItem;
+
+    if (item.id) {
+      savedItem = {
+        id: item.id,
+        titulo: item.titulo?.trim() || 'Culto / Encontro',
+        dia_horario: item.dia_horario?.trim() || 'Domingo · 19h00',
+        descricao: item.descricao?.trim() || '',
+        local: item.local?.trim() || 'Templo Central',
+        cor: item.cor || 'blue',
+        created_at: item.created_at || new Date().toISOString(),
+      };
+      const updated = current.map((a) => (a.id === item.id ? savedItem : a));
+      localStorage.setItem(STORAGE_KEYS.AGENDA, JSON.stringify(updated));
+    } else {
+      savedItem = {
+        id: generateUUID(),
+        titulo: item.titulo?.trim() || 'Culto / Encontro',
+        dia_horario: item.dia_horario?.trim() || 'Domingo · 19h00',
+        descricao: item.descricao?.trim() || '',
+        local: item.local?.trim() || 'Templo Central',
+        cor: item.cor || 'blue',
+        created_at: new Date().toISOString(),
+      };
+      const updated = [...current, savedItem];
+      localStorage.setItem(STORAGE_KEYS.AGENDA, JSON.stringify(updated));
+    }
+
+    return savedItem;
+  },
+
+  async deleteAgendaItem(id: string): Promise<void> {
+    const current = await this.getAgenda();
+    const updated = current.filter((a) => a.id !== id);
+    localStorage.setItem(STORAGE_KEYS.AGENDA, JSON.stringify(updated));
+  },
 };
+
+export const DEFAULT_AGENDA: AgendaItem[] = [
+  {
+    id: 'agenda-1',
+    titulo: 'Culto de Oração & Doutrina',
+    dia_horario: 'Quarta-feira · 19h30',
+    descricao: 'Estudo bíblico expositivo no Templo Central.',
+    local: 'Templo Central',
+    cor: 'blue',
+  },
+  {
+    id: 'agenda-2',
+    titulo: 'Encontro das Células',
+    dia_horario: 'Quinta & Sexta · 20h00',
+    descricao: 'Reunião nos lares para estudo e comunhão.',
+    local: 'Lares nos Bairros',
+    cor: 'green',
+  },
+  {
+    id: 'agenda-3',
+    titulo: 'Culto de Celebração & Ceia',
+    dia_horario: 'Domingo · 10h & 18h',
+    descricao: 'Louvor comunitário e ministração da Palavra.',
+    local: 'Nave Principal',
+    cor: 'indigo',
+  },
+];

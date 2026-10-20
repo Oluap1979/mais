@@ -67,3 +67,14 @@ export interface ChurchLicense {
   email?: string;
 }
 
+export interface AgendaItem {
+  id: string;
+  user_id?: string;
+  titulo: string;
+  dia_horario: string;
+  descricao: string;
+  local?: string;
+  cor?: 'blue' | 'green' | 'indigo' | 'purple' | 'amber' | 'rose';
+  created_at?: string;
+}
+
