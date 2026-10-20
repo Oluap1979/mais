@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Group, Briefcase, DollarSign, Church, LogOut, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, Group, Briefcase, DollarSign, Church, LogOut, Settings, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { UserSession } from '../types/database';
 
@@ -10,6 +10,7 @@ interface SidebarProps {
   user: UserSession | null;
   onLogout: () => void;
   onOpenConfig?: () => void;
+  onOpenAdmin?: () => void;
   isMobile?: boolean;
   onCloseMobile?: () => void;
 }
@@ -20,6 +21,7 @@ export function Sidebar({
   user,
   onLogout,
   onOpenConfig,
+  onOpenAdmin,
   isMobile = false,
   onCloseMobile,
 }: SidebarProps) {
@@ -94,6 +96,19 @@ export function Sidebar({
         )}
 
         <div className="flex flex-col gap-1">
+          {onOpenAdmin && (
+            <button
+              onClick={() => {
+                onOpenAdmin();
+                if (isMobile && onCloseMobile) onCloseMobile();
+              }}
+              className="flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-blue-300 hover:text-white hover:bg-blue-900/40 rounded-md transition-colors w-full cursor-pointer"
+            >
+              <ShieldCheck className="h-3.5 w-3.5 text-blue-400" />
+              <span>Painel Admin</span>
+            </button>
+          )}
+
           {onOpenConfig && (
             <button
               onClick={() => {

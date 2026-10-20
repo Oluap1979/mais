@@ -1,13 +1,15 @@
 import React from 'react';
-import { Menu, Church, Settings } from 'lucide-react';
-import type { UserSession } from '../types/database';
+import { Menu, Church, Settings, ShieldCheck, Clock } from 'lucide-react';
+import type { UserSession, ChurchLicense } from '../types/database';
 import type { NavItemKey } from './Sidebar';
 
 interface HeaderProps {
   currentPath: NavItemKey;
   onOpenMobileMenu: () => void;
   user: UserSession | null;
+  license?: ChurchLicense | null;
   onOpenConfig?: () => void;
+  onOpenAdmin?: () => void;
   onRefresh?: () => Promise<void> | void;
 }
 
@@ -19,7 +21,7 @@ const titles: Record<NavItemKey, { title: string; subtitle: string }> = {
   financeiro: { title: 'Gestão Financeira', subtitle: 'Dízimos, ofertas, relatórios e saídas' },
 };
 
-export function Header({ currentPath, onOpenMobileMenu, user, onOpenConfig }: HeaderProps) {
+export function Header({ currentPath, onOpenMobileMenu, user, license, onOpenConfig, onOpenAdmin }: HeaderProps) {
   const current = titles[currentPath] || titles.dashboard;
 
   return (
@@ -40,12 +42,38 @@ export function Header({ currentPath, onOpenMobileMenu, user, onOpenConfig }: He
         </div>
       </div>
 
-      {/* Right zone: Church community, settings & profile */}
+      {/* Right zone: Church community, license badge, settings & profile */}
       <div className="flex items-center gap-2.5 sm:gap-3">
+        {license?.status === 'active' ? (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold shadow-2xs">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+            <span className="hidden sm:inline">Licença Vitalícia Ativa</span>
+            <span className="sm:hidden">Vitalícia</span>
+          </div>
+        ) : license?.status === 'trial' ? (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold shadow-2xs">
+            <Clock className="h-3.5 w-3.5 text-amber-600" />
+            <span>Teste: {license.daysRemaining}d</span>
+          </div>
+        ) : null}
+
         <div className="hidden lg:flex items-center gap-2 text-xs text-gray-600 font-medium">
           <Church className="h-4 w-4 text-blue-600" />
           <span className="text-gray-900 font-semibold">{user?.igreja || 'Mais Igreja'}</span>
         </div>
+
+        {onOpenAdmin && (
+          <button
+            type="button"
+            onClick={onOpenAdmin}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors text-xs font-bold cursor-pointer shadow-2xs"
+            title="Acessar Painel do Administrador"
+          >
+            <ShieldCheck className="h-3.5 w-3.5 text-blue-600" />
+            <span className="hidden sm:inline">Painel Admin</span>
+            <span className="sm:hidden">Admin</span>
+          </button>
+        )}
 
         {onOpenConfig && (
           <button

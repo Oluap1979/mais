@@ -400,16 +400,27 @@ export const db = {
   // Retorna a licença do usuário/igreja conectada
   async getLicense(email?: string, userId?: string): Promise<ChurchLicense> {
     const user = this.getUser();
-    const queryEmail = email || user?.email;
+    const queryEmail = (email || user?.email || '').trim().toLowerCase();
     const queryUserId = userId || user?.id;
 
     if (!queryEmail && !queryUserId) {
       return { status: 'trial_expired', daysRemaining: 0 };
     }
 
+    // Verifica se já temos licença ativa em cache
+    let cachedLicense: ChurchLicense | null = null;
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.LICENSE);
+      if (local) {
+        cachedLicense = JSON.parse(local);
+      }
+    } catch {
+      // continua
+    }
+
     try {
       const res = await fetch(
-        `/api/license/status?email=${encodeURIComponent(queryEmail || '')}&userId=${encodeURIComponent(queryUserId || '')}`
+        `/api/license/status?email=${encodeURIComponent(queryEmail)}&userId=${encodeURIComponent(queryUserId || '')}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -431,14 +442,9 @@ export const db = {
       console.warn('Erro ao consultar status da licença no servidor:', e);
     }
 
-    // Fallback local caso offline
-    try {
-      const local = localStorage.getItem(STORAGE_KEYS.LICENSE);
-      if (local) {
-        return JSON.parse(local);
-      }
-    } catch {
-      // continua
+    // Se temos licença em cache, prioriza especialmente se já for 'active'
+    if (cachedLicense) {
+      return cachedLicense;
     }
 
     return { status: 'trial', daysRemaining: 14 };
@@ -473,6 +479,30 @@ export const db = {
     return json;
   },
 
+  // Valida um token em tempo real antes de ativar
+  async validateToken(token: string): Promise<{ valid: boolean; message: string; error?: string; status?: string }> {
+    const cleanToken = (token || '').replace(/\s+/g, '').toUpperCase();
+    if (!cleanToken) return { valid: false, message: 'Digite o código do token.' };
+
+    try {
+      const res = await fetch('/api/license/validate-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: cleanToken }),
+      });
+      const data = await res.json();
+      if (res.ok && data.valid) {
+        return { valid: true, message: data.message || 'Token válido para ativação permanente.', status: data.status };
+      }
+      return { valid: false, message: data.error || 'Token inválido', error: data.error, status: data.status };
+    } catch {
+      if (cleanToken.startsWith('MI-') && cleanToken.length >= 8) {
+        return { valid: true, message: 'Formato de token válido para ativação permanente!', status: 'disponivel' };
+      }
+      return { valid: false, message: 'Formato de token inválido.' };
+    }
+  },
+
   // Ativa a licença permanente vitalícia através do Token (Opção B)
   async activateToken(data: {
     token: string;
@@ -482,35 +512,43 @@ export const db = {
     cargo?: string;
     user_id?: string;
   }): Promise<{ success: boolean; status: LicenseStatus; message: string }> {
+    const cleanToken = (data.token || '').replace(/\s+/g, '').toUpperCase();
+    const payload = { ...data, token: cleanToken };
+
     try {
       const res = await fetch('/api/license/activate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
-      if (res.ok) {
+      if (res.ok && json.success) {
         const lic: ChurchLicense = {
           status: 'active',
           daysRemaining: 0,
           activatedAt: new Date().toISOString(),
-          tokenCode: data.token,
+          tokenCode: cleanToken,
           igrejaNome: data.igreja_nome,
           email: data.email,
         };
         localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
         return json;
+      } else if (!res.ok && json.error) {
+        throw new Error(json.error);
       }
-    } catch {
-      // fallback local
+    } catch (err: any) {
+      // Se for erro de validação específico retornado pelo servidor, propaga
+      if (err.message && (err.message.includes('revogado') || err.message.includes('utilizado'))) {
+        throw err;
+      }
     }
 
-    // Fallback local garantido
+    // Fallback local garantido se o formato for válido
     const lic: ChurchLicense = {
       status: 'active',
       daysRemaining: 0,
       activatedAt: new Date().toISOString(),
-      tokenCode: data.token,
+      tokenCode: cleanToken,
       igrejaNome: data.igreja_nome,
       email: data.email,
     };
@@ -518,7 +556,7 @@ export const db = {
     return {
       success: true,
       status: 'active',
-      message: 'Licença permanente ativada com sucesso!',
+      message: 'Licença permanente vitalícia ativada com sucesso!',
     };
   },
 

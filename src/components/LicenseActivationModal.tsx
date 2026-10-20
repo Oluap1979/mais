@@ -4,7 +4,7 @@ import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Key, Church, CheckCircle2, AlertTriangle, ShieldCheck, Sparkles } from 'lucide-react';
 import { useToast } from './ui/toast';
-import { db } from '../lib/supabase';
+import { db, STORAGE_KEYS } from '../lib/supabase';
 import type { UserSession } from '../types/database';
 
 interface LicenseActivationModalProps {
@@ -28,31 +28,44 @@ export function LicenseActivationModal({
 
   const handleActivate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tokenCode.trim()) {
+    const cleanToken = tokenCode.replace(/\s+/g, '').toUpperCase();
+    if (!cleanToken) {
       toastError('❌ Por favor, digite o código do token de ativação.');
       return;
     }
 
-    if (!user) {
-      toastError('❌ Erro: Sessão de usuário não encontrada.');
-      return;
-    }
+    const currentUser = user || db.getUser();
+    const churchEmail = (currentUser?.email || 'pastor@maisigreja.com.br').toLowerCase();
+    const churchNome = currentUser?.igreja || 'Mais Igreja';
 
     setLoading(true);
     try {
       const res = await db.activateToken({
-        token: tokenCode.trim(),
-        email: user.email,
-        igreja_nome: user.igreja || 'Minha Igreja',
-        responsavel_nome: user.nome,
-        cargo: user.cargo,
-        user_id: user.id,
+        token: cleanToken,
+        email: churchEmail,
+        igreja_nome: churchNome,
+        responsavel_nome: currentUser?.nome || 'Pastor Titular',
+        cargo: currentUser?.cargo || 'Pastor Titular',
+        user_id: currentUser?.id,
       });
 
-      if (res.success) {
+      if (res && res.success) {
+        // Atualiza a licença imediatamente em cache
+        const lic = {
+          status: 'active' as const,
+          daysRemaining: 0,
+          activatedAt: new Date().toISOString(),
+          tokenCode: cleanToken,
+          igrejaNome: churchNome,
+          email: churchEmail,
+        };
+        localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
+
         toastSuccess('🎉 Licença permanente ativada com sucesso! Acesso vitalício liberado.');
         onActivated();
         onOpenChange(false);
+      } else {
+        toastError('❌ Não foi possível ativar o token. Verifique o código digitado.');
       }
     } catch (err: any) {
       toastError(`❌ ${err.message || 'Erro ao ativar o token.'}`);
@@ -112,7 +125,7 @@ export function LicenseActivationModal({
             type="text"
             placeholder="MI-XXXX-XXXX-XXXX-XXXX"
             value={tokenCode}
-            onChange={(e) => setTokenCode(e.target.value.toUpperCase())}
+            onChange={(e) => setTokenCode(e.target.value.replace(/\s+/g, '').toUpperCase())}
             className="font-mono uppercase bg-white text-gray-900 text-sm tracking-wider"
             autoFocus
           />

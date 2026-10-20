@@ -1,0 +1,153 @@
+{
+  "tokens": [
+    {
+      "id": "739b0802-dc0a-4ec2-bd92-f690fd3141cd",
+      "token_code": "MI-07B1-BE30-BD3B-0E1A",
+      "token_hash": "8b7c742db541b7349ea2a66d550e9cd26dbfa51959c0bbdf8e77460a155fd053",
+      "status": "disponivel",
+      "created_at": "2026-10-20T18:28:04.970Z",
+      "created_by": "paulotavares78@hotmail.com",
+      "observacoes": "Lote de teste Paulo"
+    },
+    {
+      "id": "4092e40e-ca64-4c34-9ffa-549c91acb22a",
+      "token_code": "MI-14C5-A14E-FFB8-7260",
+      "token_hash": "d6994495abd5e7478ed60a60bc1ef92cc680edc9b1021257706c36e322d9f0e4",
+      "status": "utilizado",
+      "created_at": "2026-10-20T18:28:04.970Z",
+      "created_by": "paulotavares78@hotmail.com",
+      "observacoes": "Lote de teste Paulo",
+      "activated_at": "2026-10-20T18:28:11.780Z",
+      "activated_by_email": "pastor.antonio@igreja.com",
+      "activated_by_igreja": "Igreja Betel"
+    },
+    {
+      "id": "8de67514-cf24-4a0a-a853-644d786bcf6e",
+      "token_code": "MI-20E5-0405-E340-67B6",
+      "token_hash": "9dc9f0f54d66afb5676daf5fbbc5b7bd726f4852309431d8b83cec318e86c8d8",
+      "status": "utilizado",
+      "created_at": "2026-10-20T18:19:57.276Z",
+      "created_by": "paulotavares78@hotmail.com",
+      "observacoes": "Teste",
+      "activated_at": "2026-10-20T18:20:00.702Z",
+      "activated_by_email": "pastorteste@igreja.com",
+      "activated_by_igreja": "Igreja da Graca"
+    },
+    {
+      "id": "05d0bd63-6e87-490b-8fdd-a2843a8ffd95",
+      "token_code": "MI-E3DB-45E7-9B86-33E7",
+      "token_hash": "05a8d82761986dd725b692c0d12c5037c0f2281a1aa8695d60ea5382e930ae8c",
+      "status": "utilizado",
+      "created_at": "2026-10-20T18:15:30.621Z",
+      "created_by": "system",
+      "activated_at": "2026-10-20T18:15:30.621Z",
+      "activated_by_email": "josieliotavares17@gmail.com",
+      "activated_by_igreja": "IGREJA AMANHECER"
+    }
+  ],
+  "churches": [
+    {
+      "id": "31761a1b-7ef4-416b-bdd8-84ff00db7448",
+      "igreja_nome": "IGREJA AMANHECER",
+      "email": "josieliotavares17@gmail.com",
+      "cargo": "Pastor Titular",
+      "status": "active",
+      "trial_start": "2026-10-20T18:15:30.621Z",
+      "trial_end": "2026-10-20T18:15:30.621Z",
+      "activated_at": "2026-10-20T18:15:30.621Z",
+      "token_code": "MI-E3DB-45E7-9B86-33E7",
+      "token_hash": "05a8d82761986dd725b692c0d12c5037c0f2281a1aa8695d60ea5382e930ae8c",
+      "created_at": "2026-10-20T18:15:30.621Z",
+      "updated_at": "2026-10-20T18:15:30.621Z"
+    },
+    {
+      "id": "d3c1dd80-24e6-416b-88af-fedf57eb9454",
+      "igreja_nome": "Igreja da Graca",
+      "email": "pastorteste@igreja.com",
+      "cargo": "Pastor Titular",
+      "status": "active",
+      "trial_start": "2026-10-20T18:20:00.702Z",
+      "trial_end": "2026-10-20T18:20:00.702Z",
+      "activated_at": "2026-10-20T18:20:00.702Z",
+      "token_code": "MI-20E5-0405-E340-67B6",
+      "token_hash": "9dc9f0f54d66afb5676daf5fbbc5b7bd726f4852309431d8b83cec318e86c8d8",
+      "created_at": "2026-10-20T18:20:00.702Z",
+      "updated_at": "2026-10-20T18:20:00.702Z"
+    },
+    {
+      "id": "7c366102-1dd3-46b4-9f88-2b340197652e",
+      "igreja_nome": "Igreja Betel",
+      "email": "pastor.antonio@igreja.com",
+      "responsavel_nome": "Pr. Antonio",
+      "cargo": "Pastor Titular",
+      "status": "active",
+      "trial_start": "2026-10-20T18:28:11.780Z",
+      "trial_end": "2026-10-20T18:28:11.780Z",
+      "activated_at": "2026-10-20T18:28:11.780Z",
+      "token_code": "MI-14C5-A14E-FFB8-7260",
+      "token_hash": "d6994495abd5e7478ed60a60bc1ef92cc680edc9b1021257706c36e322d9f0e4",
+      "created_at": "2026-10-20T18:28:11.780Z",
+      "updated_at": "2026-10-20T18:28:11.780Z"
+    }
+  ],
+  "logs": [
+    {
+      "id": "93abc143-c862-4189-83c5-3c4d76fe0a3b",
+      "tipo": "ativacao_token",
+      "descricao": "Licença permanente ativada com sucesso para \"Igreja Betel\" (pastor.antonio@igreja.com) com o token MI-14C5-A14E-FFB8-7260.",
+      "user_email": "pastor.antonio@igreja.com",
+      "igreja_nome": "Igreja Betel",
+      "created_at": "2026-10-20T18:28:11.780Z"
+    },
+    {
+      "id": "b4f924f3-6ed2-4a3c-ac2f-6569ea293b21",
+      "tipo": "geracao_token",
+      "descricao": "Administrador gerou 2 novo(s) token(s) de ativação permanente.",
+      "user_email": "paulotavares78@hotmail.com",
+      "created_at": "2026-10-20T18:28:04.970Z"
+    },
+    {
+      "id": "10b16fcb-be87-42ef-9d80-08aed1868076",
+      "tipo": "login_admin",
+      "descricao": "Administrador (paulotavares78@hotmail.com) efetuou login no painel de gestão.",
+      "user_email": "paulotavares78@hotmail.com",
+      "created_at": "2026-10-20T18:28:00.700Z"
+    },
+    {
+      "id": "abb49643-b366-4ef1-a43d-d50288225345",
+      "tipo": "ativacao_token",
+      "descricao": "Licença permanente ativada com sucesso para \"Igreja da Graca\" (pastorteste@igreja.com) com o token MI-20E5-0405-E340-67B6.",
+      "user_email": "pastorteste@igreja.com",
+      "igreja_nome": "Igreja da Graca",
+      "created_at": "2026-10-20T18:20:00.702Z"
+    },
+    {
+      "id": "7bf76195-765b-4e37-8b73-32685cf3f8f3",
+      "tipo": "geracao_token",
+      "descricao": "Administrador gerou 1 novo(s) token(s) de ativação permanente.",
+      "user_email": "paulotavares78@hotmail.com",
+      "created_at": "2026-10-20T18:19:57.276Z"
+    },
+    {
+      "id": "ebd636a4-ee58-4bdd-9b6e-35f78ae1506e",
+      "tipo": "login_admin",
+      "descricao": "Administrador (paulotavares78@hotmail.com) efetuou login no painel de gestão.",
+      "user_email": "paulotavares78@hotmail.com",
+      "created_at": "2026-10-20T18:19:49.501Z"
+    },
+    {
+      "id": "e9b3cc9c-b8b5-479e-8fe1-650fa2548e1e",
+      "tipo": "ativacao_token",
+      "descricao": "Licença permanente ativada com sucesso para \"IGREJA AMANHECER\" (josieliotavares17@gmail.com) com o token MI-E3DB-45E7-9B86-33E7.",
+      "user_email": "josieliotavares17@gmail.com",
+      "igreja_nome": "IGREJA AMANHECER",
+      "created_at": "2026-10-20T18:15:30.621Z"
+    },
+    {
+      "id": "aa222a33-c74a-439c-88e8-9bd3ee5a8c3f",
+      "tipo": "geracao_token",
+      "descricao": "Sistema de Licenças Inicializado com sucesso.",
+      "created_at": "2026-10-20T18:15:24.201Z"
+    }
+  ]
+}

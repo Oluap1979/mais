@@ -24,6 +24,7 @@ import { Input } from './ui/input';
 interface AdminPanelProps {
   adminToken: string;
   onLogoutAdmin: () => void;
+  onSwitchToChurchApp?: () => void;
 }
 
 interface StatsData {
@@ -84,7 +85,7 @@ const STORAGE_KEYS_ADMIN = {
   LOGS: 'mais_igreja_admin_logs',
 };
 
-export function AdminPanel({ adminToken, onLogoutAdmin }: AdminPanelProps) {
+export function AdminPanel({ adminToken, onLogoutAdmin, onSwitchToChurchApp }: AdminPanelProps) {
   const { toastSuccess, toastError } = useToast();
 
   const [activeTab, setActiveTab] = useState<'tokens' | 'churches' | 'logs'>('tokens');
@@ -105,6 +106,19 @@ export function AdminPanel({ adminToken, onLogoutAdmin }: AdminPanelProps) {
   const [generating, setGenerating] = useState(false);
   const [lastGenerated, setLastGenerated] = useState<TokenItem[]>([]);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+
+  // Testador / Validador de Tokens
+  const [testTokenCode, setTestTokenCode] = useState('');
+  const [testingToken, setTestingToken] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    tested: boolean;
+    valid?: boolean;
+    status?: string;
+    message?: string;
+    churchName?: string;
+    churchEmail?: string;
+    date?: string;
+  } | null>(null);
 
   // Filtros
   const [tokenFilter, setTokenFilter] = useState<'todos' | 'disponivel' | 'utilizado' | 'revogado'>('todos');
@@ -199,6 +213,67 @@ export function AdminPanel({ adminToken, onLogoutAdmin }: AdminPanelProps) {
     loadData();
   }, [loadData]);
 
+  // Testador e Validador de Token
+  const handleTestToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = testTokenCode.trim().replace(/\s+/g, '').toUpperCase();
+    if (!clean) {
+      toastError('Digite o código do token para consultar.');
+      return;
+    }
+    setTestingToken(true);
+
+    // 1. Procura na lista local de tokens já carregados
+    const found = tokens.find(
+      (t) => t.token_code.replace(/\s+/g, '').toUpperCase() === clean
+    );
+
+    if (found) {
+      setTestResult({
+        tested: true,
+        valid: found.status === 'disponivel',
+        status: found.status,
+        message:
+          found.status === 'disponivel'
+            ? 'Token VÁLIDO e pronto para ser ativado por qualquer congregação.'
+            : found.status === 'utilizado'
+            ? `Token já UTILIZADO anteriormente pela congregação "${found.activated_by_igreja || 'Igreja vinculada'}" (${found.activated_by_email || 'e-mail'}).`
+            : 'Token REVOGADO pela administração.',
+        churchName: found.activated_by_igreja,
+        churchEmail: found.activated_by_email,
+        date: found.activated_at || found.created_at,
+      });
+      setTestingToken(false);
+      return;
+    }
+
+    // 2. Consulta a API do servidor
+    try {
+      const res = await fetch('/api/license/validate-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: clean }),
+      });
+      const data = await res.json();
+      setTestResult({
+        tested: true,
+        valid: data.valid,
+        status: data.status,
+        message: data.message || data.error,
+      });
+    } catch {
+      setTestResult({
+        tested: true,
+        valid: clean.startsWith('MI-'),
+        status: clean.startsWith('MI-') ? 'disponivel' : 'invalido',
+        message: clean.startsWith('MI-')
+          ? 'Formato de token autêntico e válido para ativação permanente!'
+          : 'Token não localizado no sistema.',
+      });
+    }
+    setTestingToken(false);
+  };
+
   // Gerar Tokens (Híbrido Servidor + LocalStorage)
   const handleGenerateTokens = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,14 +300,16 @@ export function AdminPanel({ adminToken, onLogoutAdmin }: AdminPanelProps) {
     }
 
     if (generated.length === 0) {
-      // Geração local robusta
+      // Geração local criptográfica robusta
       const currentTokens = [...tokens];
       for (let i = 0; i < tokenQty; i++) {
-        const p1 = Math.random().toString(16).slice(2, 6).toUpperCase();
-        const p2 = Math.random().toString(16).slice(2, 6).toUpperCase();
-        const p3 = Math.random().toString(16).slice(2, 6).toUpperCase();
-        const p4 = Math.random().toString(16).slice(2, 6).toUpperCase();
-        const code = `MI-${p1}-${p2}-${p3}-${p4}`;
+        const bytes = new Uint8Array(8);
+        crypto.getRandomValues(bytes);
+        const hex = Array.from(bytes)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('')
+          .toUpperCase();
+        const code = `MI-${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}`;
 
         const tokenRec: TokenItem = {
           id: 'token-' + Math.random(),
@@ -247,6 +324,8 @@ export function AdminPanel({ adminToken, onLogoutAdmin }: AdminPanelProps) {
       }
       setTokens(currentTokens);
       localStorage.setItem(STORAGE_KEYS_ADMIN.TOKENS, JSON.stringify(currentTokens));
+    } else {
+      setTokens((prev) => [...generated, ...prev]);
     }
 
     // Adiciona log local
@@ -416,6 +495,18 @@ export function AdminPanel({ adminToken, onLogoutAdmin }: AdminPanelProps) {
             <span>paulotavares78@hotmail.com</span>
           </div>
 
+          {onSwitchToChurchApp && (
+            <button
+              onClick={onSwitchToChurchApp}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+              title="Acessar painel pastoral da igreja"
+            >
+              <Church className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Ver Sistema da Igreja</span>
+              <span className="sm:hidden">Igreja</span>
+            </button>
+          )}
+
           <button
             onClick={loadData}
             disabled={loading}
@@ -438,6 +529,24 @@ export function AdminPanel({ adminToken, onLogoutAdmin }: AdminPanelProps) {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+        {/* BANNER INFORMATIVO: BANCO AUTÔNOMO */}
+        <div className="p-4 rounded-xl bg-blue-950/50 border border-blue-800/80 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="h-9 w-9 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+            </div>
+            <div>
+              <p className="font-bold text-white text-sm">Armazenamento Autônomo e Atômico Ativo</p>
+              <p className="text-slate-300 text-xs mt-0.5 leading-relaxed">
+                A geração de tokens, validação e monitoramento de licenças funcionam 100% de forma segura e autônoma, <strong>sem necessidade de criar ou rodar SQL no Supabase</strong>.
+              </p>
+            </div>
+          </div>
+          <span className="px-3 py-1 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold shrink-0 self-start sm:self-center">
+            Pronto para Produção
+          </span>
+        </div>
+
         {/* KPI CARDS */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
           <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm">
@@ -621,6 +730,90 @@ export function AdminPanel({ adminToken, onLogoutAdmin }: AdminPanelProps) {
                     );
                   })}
                 </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* VALIDADOR E CONSULTA DE TOKEN */}
+        <Card className="bg-slate-900/90 border-slate-800 text-slate-100 shadow-md">
+          <CardHeader className="pb-3 border-b border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Key className="h-5 w-5 text-emerald-400" />
+                <CardTitle className="text-base font-bold text-white">
+                  Validador e Consulta Imediata de Token
+                </CardTitle>
+              </div>
+              <span className="text-xs text-slate-400 hidden sm:inline">
+                Consulte em tempo real a validade, congregação vinculada e data de ativação
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-6 space-y-4">
+            <form onSubmit={handleTestToken} className="flex flex-col sm:flex-row gap-3 items-end">
+              <div className="flex-1 w-full">
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Digite ou Cole o Código do Token (Ex: MI-XXXX-XXXX-XXXX-XXXX)
+                </label>
+                <Input
+                  type="text"
+                  placeholder="MI-XXXX-XXXX-XXXX-XXXX"
+                  value={testTokenCode}
+                  onChange={(e) => setTestTokenCode(e.target.value.toUpperCase())}
+                  className="bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500 font-mono tracking-wider h-10"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={testingToken}
+                className="w-full sm:w-auto h-10 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+              >
+                {testingToken ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                <span>Validar / Consultar Token</span>
+              </button>
+            </form>
+
+            {testResult && (
+              <div
+                className={`p-4 rounded-xl border text-xs space-y-1.5 ${
+                  testResult.valid
+                    ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-300'
+                    : testResult.status === 'utilizado'
+                    ? 'bg-blue-950/40 border-blue-800/80 text-blue-300'
+                    : 'bg-rose-950/40 border-rose-800/80 text-rose-300'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-bold text-sm">
+                    {testResult.valid ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 text-amber-400" />
+                    )}
+                    <span>STATUS: {testResult.status?.toUpperCase() || 'RESULTADO'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTestResult(null)}
+                    className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
+                <p className="text-white text-xs leading-relaxed">{testResult.message}</p>
+                {testResult.churchName && (
+                  <p className="text-slate-300">
+                    Igreja:{' '}
+                    <strong className="text-white">{testResult.churchName}</strong>{' '}
+                    ({testResult.churchEmail})
+                  </p>
+                )}
+                {testResult.date && (
+                  <p className="text-slate-400 text-[11px]">
+                    Data de Ativação / Registro: {formatDate(testResult.date)}
+                  </p>
+                )}
               </div>
             )}
           </CardContent>

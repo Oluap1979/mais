@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
-import { ShieldCheck, Lock, Mail, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Lock, Mail, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { useToast } from './ui/toast';
 import { STORAGE_KEYS } from '../lib/supabase';
 
@@ -16,7 +16,8 @@ export function AdminLoginModal({ open, onOpenChange, onAdminLoginSuccess }: Adm
   const { toastSuccess, toastError } = useToast();
 
   const [adminEmail, setAdminEmail] = useState('paulotavares78@hotmail.com');
-  const [adminPassword, setAdminPassword] = useState('Typescript1978*#');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -61,10 +62,10 @@ export function AdminLoginModal({ open, onOpenChange, onAdminLoginSuccess }: Adm
         return;
       }
     } catch {
-      // ignora e usa fallback local
+      // continua para fallback
     }
 
-    // Fallback local garantido 100% robusto
+    // Fallback garantido para o administrador autorizado
     const mockToken = 'admin-token-paulotavares78-' + Date.now();
     localStorage.setItem(STORAGE_KEYS.ADMIN_TOKEN, mockToken);
     toastSuccess('✅ Acesso administrativo autorizado com sucesso!');
@@ -120,16 +121,24 @@ export function AdminLoginModal({ open, onOpenChange, onAdminLoginSuccess }: Adm
           <div className="relative">
             <Lock className="h-4 w-4 absolute left-3 top-3 text-gray-400" />
             <Input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               value={adminPassword}
               onChange={(e) => setAdminPassword(e.target.value)}
-              className="pl-9 bg-white text-gray-900 text-xs"
-              placeholder="••••••••"
+              className="pl-9 pr-10 bg-white text-gray-900 text-xs"
+              placeholder="Digite sua senha"
               autoFocus
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+              tabIndex={-1}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
           </div>
           <p className="text-[11px] text-gray-500 mt-1">
-            Insira a senha cadastrada para acessar o painel restrito.
+            Insira sua senha de administrador para desbloquear o painel.
           </p>
         </div>
 

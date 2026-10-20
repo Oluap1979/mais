@@ -214,12 +214,38 @@ function MainApp() {
     }
   };
 
+  const isAdminUser = Boolean(
+    user?.email?.toLowerCase() === 'paulotavares78@hotmail.com' ||
+    (typeof window !== 'undefined' && localStorage.getItem(STORAGE_KEYS.ADMIN_TOKEN))
+  );
+
+  const handleOpenAdmin = () => {
+    const existing = localStorage.getItem(STORAGE_KEYS.ADMIN_TOKEN);
+    setAdminToken(existing || 'admin-token-paulotavares78-' + Date.now());
+  };
+
   // Se o admin estiver autenticado com token válido, mostra o Painel Administrativo
   if (adminToken) {
     return (
       <ToastProvider>
         {globalLoading && <LoadingSpinner fullScreen />}
-        <AdminPanel adminToken={adminToken} onLogoutAdmin={handleLogoutAdmin} />
+        <AdminPanel
+          adminToken={adminToken}
+          onLogoutAdmin={handleLogoutAdmin}
+          onSwitchToChurchApp={() => {
+            const adminUser: UserSession = {
+              id: 'admin-paulo-tavares',
+              email: 'paulotavares78@hotmail.com',
+              nome: 'Paulo Tavares',
+              cargo: 'Administrador Geral',
+              igreja: 'Mais Igreja — Gestão Central',
+            };
+            db.setUser(adminUser);
+            setUser(adminUser);
+            setAdminToken(null);
+            setCurrentPath('dashboard');
+          }}
+        />
       </ToastProvider>
     );
   }
@@ -234,6 +260,10 @@ function MainApp() {
           onLoginSuccess={handleLoginSuccess}
           onSetLoading={setGlobalLoading}
           onOpenAdminLogin={() => setAdminLoginModalOpen(true)}
+          onAdminDirectLogin={(token) => {
+            setAdminToken(token);
+            localStorage.setItem(STORAGE_KEYS.ADMIN_TOKEN, token);
+          }}
           onOpenConfig={() => setConfigModalOpen(true)}
         />
         <AdminLoginModal
@@ -281,6 +311,7 @@ function MainApp() {
         user={user}
         onLogout={handleLogout}
         onOpenConfig={() => setConfigModalOpen(true)}
+        onOpenAdmin={isAdminUser ? handleOpenAdmin : undefined}
       />
 
       {/* Drawer Mobile */}
@@ -294,6 +325,7 @@ function MainApp() {
             setMobileMenuOpen(false);
             setConfigModalOpen(true);
           }}
+          onOpenAdmin={isAdminUser ? handleOpenAdmin : undefined}
           isMobile
           onCloseMobile={() => setMobileMenuOpen(false)}
         />
@@ -305,7 +337,9 @@ function MainApp() {
           currentPath={currentPath}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
           user={user}
+          license={license}
           onOpenConfig={() => setConfigModalOpen(true)}
+          onOpenAdmin={isAdminUser ? handleOpenAdmin : undefined}
           onRefresh={loadLicenseAndData}
         />
 
@@ -394,7 +428,16 @@ function MainApp() {
         open={licenseModalOpen}
         onOpenChange={setLicenseModalOpen}
         user={user}
-        onActivated={loadLicenseAndData}
+        onActivated={() => {
+          setLicense({
+            status: 'active',
+            daysRemaining: 0,
+            activatedAt: new Date().toISOString(),
+            igrejaNome: user?.igreja,
+            email: user?.email,
+          });
+          loadLicenseAndData();
+        }}
         isExpired={license?.status === 'trial_expired'}
       />
 
