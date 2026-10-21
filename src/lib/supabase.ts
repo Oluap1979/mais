@@ -399,7 +399,7 @@ export const db = {
     }
   },
 
-  // Retorna a licença do usuário/igreja conectada
+  // Retorna a licença do servidor como fonte única da verdade
   async getLicense(email?: string, userId?: string): Promise<ChurchLicense> {
     const user = this.getUser();
     const queryEmail = (email || user?.email || '').trim().toLowerCase();
@@ -409,21 +409,12 @@ export const db = {
       return { status: 'trial_expired', daysRemaining: 0 };
     }
 
-    // Verifica se já temos licença ativa em cache
-    let cachedLicense: ChurchLicense | null = null;
     try {
-      const local = localStorage.getItem(STORAGE_KEYS.LICENSE);
-      if (local) {
-        cachedLicense = JSON.parse(local);
-      }
-    } catch {
-      // continua
-    }
-
-    try {
+      // Sempre consulta o servidor - o servidor é a autoridade máxima
       const res = await fetch(
         `/api/license/status?email=${encodeURIComponent(queryEmail)}&userId=${encodeURIComponent(queryUserId || '')}`
       );
+      
       if (res.ok) {
         const data = await res.json();
         if (data && data.exists) {
@@ -436,20 +427,18 @@ export const db = {
             igrejaNome: data.igrejaNome,
             email: data.email,
           };
+          
+          // Atualiza o cache apenas para fins de UI, mas o servidor controla o acesso
           localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
           return lic;
         }
       }
     } catch (e) {
-      console.warn('Erro ao consultar status da licença no servidor:', e);
+      console.error('Falha crítica ao consultar servidor:', e);
     }
 
-    // Se temos licença em cache, prioriza especialmente se já for 'active'
-    if (cachedLicense) {
-      return cachedLicense;
-    }
-
-    return { status: 'trial', daysRemaining: 14 };
+    // Se o servidor não confirmou como ativo, assume que não é ativo (segurança)
+    return { status: 'trial_expired', daysRemaining: 0 };
   },
 
   // Inicia o teste gratuito de 14 dias (Opção A)
