@@ -149,5 +149,37 @@
       "descricao": "Sistema de Licenças Inicializado com sucesso.",
       "created_at": "2026-10-20T18:15:24.201Z"
     }
+  ],
+  "users": [
+    {
+      "id": "31761a1b-7ef4-416b-bdd8-84ff00db7448",
+      "email": "josieliotavares17@gmail.com",
+      "password": "Password123!",
+      "nome": "Pastor Titular",
+      "cargo": "Pastor Titular",
+      "igreja": "IGREJA AMANHECER",
+      "token_code": "MI-E3DB-45E7-9B86-33E7",
+      "created_at": "2026-10-20T18:15:30.621Z"
+    },
+    {
+      "id": "d3c1dd80-24e6-416b-88af-fedf57eb9454",
+      "email": "pastorteste@igreja.com",
+      "password": "Password123!",
+      "nome": "Pastor Titular",
+      "cargo": "Pastor Titular",
+      "igreja": "Igreja da Graca",
+      "token_code": "MI-20E5-0405-E340-67B6",
+      "created_at": "2026-10-20T18:20:00.702Z"
+    },
+    {
+      "id": "7c366102-1dd3-46b4-9f88-2b340197652e",
+      "email": "pastor.antonio@igreja.com",
+      "password": "Password123!",
+      "nome": "Pr. Antonio",
+      "cargo": "Pastor Titular",
+      "igreja": "Igreja Betel",
+      "token_code": "MI-14C5-A14E-FFB8-7260",
+      "created_at": "2026-10-20T18:28:11.780Z"
+    }
   ]
 }

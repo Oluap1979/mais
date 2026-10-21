@@ -400,20 +400,24 @@ export const db = {
   },
 
   // Retorna a licença do servidor como fonte única da verdade
-  async getLicense(email?: string, userId?: string): Promise<ChurchLicense> {
+  async getLicense(email?: string, userId?: string, igreja?: string): Promise<ChurchLicense> {
     const user = this.getUser();
     const queryEmail = (email || user?.email || '').trim().toLowerCase();
     const queryUserId = userId || user?.id;
+    const queryIgreja = (igreja || user?.igreja || '').trim();
 
-    if (!queryEmail && !queryUserId) {
+    if (!queryEmail && !queryUserId && !queryIgreja) {
       return { status: 'trial_expired', daysRemaining: 0 };
     }
 
     try {
+      const params = new URLSearchParams();
+      if (queryEmail) params.set('email', queryEmail);
+      if (queryUserId) params.set('userId', queryUserId);
+      if (queryIgreja) params.set('igreja', queryIgreja);
+
       // Sempre consulta o servidor - o servidor é a autoridade máxima
-      const res = await fetch(
-        `/api/license/status?email=${encodeURIComponent(queryEmail)}&userId=${encodeURIComponent(queryUserId || '')}`
-      );
+      const res = await fetch(`/api/license/status?${params.toString()}`);
       
       if (res.ok) {
         const data = await res.json();
@@ -424,17 +428,27 @@ export const db = {
             trialStart: data.trialStart,
             trialEnd: data.trialEnd,
             activatedAt: data.activatedAt,
-            igrejaNome: data.igrejaNome,
-            email: data.email,
+            igrejaNome: data.igrejaNome || queryIgreja,
+            email: data.email || queryEmail,
           };
           
-          // Atualiza o cache apenas para fins de UI, mas o servidor controla o acesso
           localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
           return lic;
         }
       }
     } catch (e) {
       console.error('Falha crítica ao consultar servidor:', e);
+    }
+
+    // Se temos licença em cache com status 'active', preserva em caso de oscilação de rede
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.LICENSE);
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (parsed && parsed.status === 'active') return parsed;
+      }
+    } catch {
+      // continua
     }
 
     // Se o servidor não confirmou como ativo, assume que não é ativo (segurança)

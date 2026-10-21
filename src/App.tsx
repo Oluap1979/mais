@@ -73,7 +73,7 @@ function MainApp() {
     if (!user) return;
     setGlobalLoading(true);
     try {
-      const lic = await db.getLicense(user.email, user.id);
+      const lic = await db.getLicense(user.email, user.id, user.igreja);
       setLicense(lic);
 
       if (lic.status === 'trial_expired') {

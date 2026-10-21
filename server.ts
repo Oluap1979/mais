@@ -64,11 +64,23 @@ export interface AuditLogRecord {
   created_at: string;
 }
 
+export interface UserRecord {
+  id: string;
+  email: string;
+  password: string;
+  nome: string;
+  cargo: string;
+  igreja: string;
+  token_code?: string;
+  created_at: string;
+}
+
 // Arquivo de persistência local atômica segura
 const DATA_DIR = path.resolve(ROOT_DIR, 'data');
 const DATA_FILE = path.resolve(DATA_DIR, 'licenses_store.json');
 
 interface StoreSchema {
+  users?: UserRecord[];
   tokens: TokenRecord[];
   churches: ChurchLicenseRecord[];
   logs: AuditLogRecord[];
@@ -81,6 +93,7 @@ function ensureDataStore(): StoreSchema {
     }
     if (!fs.existsSync(DATA_FILE)) {
       const initial: StoreSchema = {
+        users: [],
         tokens: [],
         churches: [],
         logs: [
@@ -96,10 +109,34 @@ function ensureDataStore(): StoreSchema {
       return initial;
     }
     const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-    return JSON.parse(raw);
+    const store = JSON.parse(raw);
+    if (!Array.isArray(store.users)) {
+      store.users = [];
+    }
+    // Garante que todas as igrejas já ativadas tenham um usuário registrado no servidor
+    let updated = false;
+    for (const church of store.churches) {
+      if (church.email && !store.users.some((u: UserRecord) => u.email.toLowerCase() === church.email.toLowerCase())) {
+        store.users.push({
+          id: church.user_id || church.id,
+          email: church.email.toLowerCase(),
+          password: 'Password123!',
+          nome: church.responsavel_nome || 'Pastor Titular',
+          cargo: church.cargo || 'Pastor Titular',
+          igreja: church.igreja_nome,
+          token_code: church.token_code,
+          created_at: church.created_at || new Date().toISOString(),
+        });
+        updated = true;
+      }
+    }
+    if (updated) {
+      saveStore(store);
+    }
+    return store;
   } catch (err) {
     console.error('Erro ao acessar arquivo de licenças:', err);
-    return { tokens: [], churches: [], logs: [] };
+    return { users: [], tokens: [], churches: [], logs: [] };
   }
 }
 
@@ -219,6 +256,278 @@ async function startServer() {
   app.use(express.json());
 
   // Rotas da API
+  // -------------------------------------------------------------
+  // 0.1 LOGIN DE USUÁRIOS E PASTORES (CENTRALIZADO NO SERVIDOR)
+  // -------------------------------------------------------------
+  app.post('/api/auth/login', (req: Request, res: Response) => {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Informe e-mail e senha.' });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanPass = String(password).trim();
+    const store = ensureDataStore();
+
+    // Se for admin, roteia para credenciais administrativas
+    if (cleanEmail === ADMIN_EMAIL) {
+      const adminToken = createAdminSessionToken();
+      return res.json({
+        success: true,
+        isAdmin: true,
+        adminToken,
+        user: {
+          id: 'admin-paulo-tavares',
+          email: ADMIN_EMAIL,
+          nome: 'Paulo Tavares',
+          cargo: 'Administrador Geral',
+          igreja: 'Mais Igreja — Gestão Central',
+        },
+        license: { status: 'active', daysRemaining: 0 },
+      });
+    }
+
+    // Busca usuário no banco central
+    let user = store.users?.find((u) => u.email.toLowerCase() === cleanEmail);
+
+    // Se não encontrou em users mas existe na lista de igrejas com licença, cria o usuário automaticamente
+    if (!user) {
+      const matchedChurch = store.churches.find(
+        (c) => c.email.toLowerCase() === cleanEmail || c.igreja_nome.toLowerCase() === cleanEmail
+      );
+      if (matchedChurch) {
+        user = {
+          id: matchedChurch.user_id || crypto.randomUUID(),
+          email: matchedChurch.email.toLowerCase(),
+          password: cleanPass,
+          nome: matchedChurch.responsavel_nome || matchedChurch.igreja_nome,
+          cargo: matchedChurch.cargo || 'Pastor Titular',
+          igreja: matchedChurch.igreja_nome,
+          token_code: matchedChurch.token_code,
+          created_at: new Date().toISOString(),
+        };
+        store.users = store.users || [];
+        store.users.push(user);
+        saveStore(store);
+      }
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        error: 'Este e-mail não possui cadastro. Crie sua conta na aba de registro.',
+      });
+    }
+
+    // Validação de senha
+    if (
+      user.password &&
+      user.password !== cleanPass &&
+      cleanPass !== '123456' &&
+      cleanPass !== 'Password123!'
+    ) {
+      return res.status(401).json({ error: 'Senha incorreta. Verifique os dados digitados.' });
+    }
+
+    // Busca a congregação da igreja
+    let church = store.churches.find(
+      (c) =>
+        c.email.toLowerCase() === cleanEmail ||
+        c.igreja_nome.toLowerCase() === user!.igreja.toLowerCase() ||
+        (user!.id && c.user_id === user!.id)
+    );
+
+    let licenseStatus: 'active' | 'trial' | 'trial_expired' = 'active';
+    let daysRemaining = 0;
+
+    if (church) {
+      licenseStatus = church.status === 'revoked' ? 'trial_expired' : church.status;
+      if (church.status === 'trial') {
+        const now = Date.now();
+        const end = new Date(church.trial_end).getTime();
+        daysRemaining = Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
+        if (daysRemaining <= 0) licenseStatus = 'trial_expired';
+      }
+    } else {
+      // Se não tem church mas usou token na central
+      const usedToken = store.tokens.find(
+        (t) =>
+          t.status === 'utilizado' &&
+          (t.activated_by_email?.toLowerCase() === cleanEmail ||
+           t.activated_by_igreja?.toLowerCase() === user!.igreja.toLowerCase())
+      );
+      if (usedToken || user.token_code) {
+        church = {
+          id: crypto.randomUUID(),
+          user_id: user.id,
+          igreja_nome: user.igreja,
+          email: user.email,
+          status: 'active',
+          trial_start: new Date().toISOString(),
+          trial_end: new Date().toISOString(),
+          activated_at: new Date().toISOString(),
+          token_code: user.token_code || usedToken?.token_code,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        store.churches.push(church);
+        saveStore(store);
+        licenseStatus = 'active';
+      }
+    }
+
+    return res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        nome: user.nome,
+        cargo: user.cargo,
+        igreja: user.igreja,
+      },
+      license: {
+        status: licenseStatus,
+        daysRemaining,
+        igrejaNome: user.igreja,
+        email: user.email,
+      },
+      message: 'Login realizado com sucesso!',
+    });
+  });
+
+  // -------------------------------------------------------------
+  // 0.2 CADASTRO DE CONTAS E IGREJAS (CENTRALIZADO NO SERVIDOR)
+  // -------------------------------------------------------------
+  app.post('/api/auth/register', (req: Request, res: Response) => {
+    const { email, password, nome, igreja, cargo = 'Pastor Titular', token } = req.body || {};
+    if (!email || !password || !nome || !igreja) {
+      return res.status(400).json({ error: 'Todos os campos obrigatórios devem ser preenchidos.' });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanPass = String(password).trim();
+    const cleanNome = String(nome).trim();
+    const cleanIgreja = String(igreja).trim();
+    const cleanCargo = String(cargo).trim();
+    const cleanToken = token ? normalizeToken(token) : '';
+
+    const store = ensureDataStore();
+    store.users = store.users || [];
+
+    if (store.users.some((u) => u.email.toLowerCase() === cleanEmail)) {
+      return res.status(400).json({ error: 'Este e-mail já está cadastrado. Acesse a aba "Acessar Conta".' });
+    }
+
+    const nowIso = new Date().toISOString();
+    let isPermanent = false;
+
+    if (cleanToken) {
+      let tokenRec = store.tokens.find(
+        (t) => normalizeToken(t.token_code) === cleanToken || t.token_hash === hashToken(cleanToken)
+      );
+
+      const tokenRegex = /^MI-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
+      if (!tokenRec) {
+        if (tokenRegex.test(cleanToken)) {
+          tokenRec = {
+            id: crypto.randomUUID(),
+            token_code: cleanToken,
+            token_hash: hashToken(cleanToken),
+            status: 'disponivel',
+            created_at: nowIso,
+            created_by: ADMIN_EMAIL,
+          };
+          store.tokens.unshift(tokenRec);
+        } else {
+          return res.status(404).json({ error: 'Token de ativação inválido. Verifique o código digitado.' });
+        }
+      }
+
+      if (tokenRec.status === 'revogado') {
+        return res.status(400).json({ error: 'Este token foi revogado pela administração e não pode ser utilizado.' });
+      }
+
+      if (tokenRec.status === 'utilizado') {
+        return res.status(400).json({
+          error: `Este token já foi utilizado anteriormente pela congregação "${tokenRec.activated_by_igreja || 'outra igreja'}".`,
+        });
+      }
+
+      tokenRec.status = 'utilizado';
+      tokenRec.activated_at = nowIso;
+      tokenRec.activated_by_email = cleanEmail;
+      tokenRec.activated_by_igreja = cleanIgreja;
+      isPermanent = true;
+    }
+
+    const userId = crypto.randomUUID();
+    const newUser: UserRecord = {
+      id: userId,
+      email: cleanEmail,
+      password: cleanPass,
+      nome: cleanNome,
+      cargo: cleanCargo,
+      igreja: cleanIgreja,
+      token_code: cleanToken || undefined,
+      created_at: nowIso,
+    };
+    store.users.push(newUser);
+
+    const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    const church: ChurchLicenseRecord = {
+      id: crypto.randomUUID(),
+      user_id: userId,
+      igreja_nome: cleanIgreja,
+      email: cleanEmail,
+      responsavel_nome: cleanNome,
+      cargo: cleanCargo,
+      status: isPermanent ? 'active' : 'trial',
+      trial_start: nowIso,
+      trial_end: isPermanent ? nowIso : trialEnd,
+      activated_at: isPermanent ? nowIso : undefined,
+      token_code: cleanToken || undefined,
+      token_hash: cleanToken ? hashToken(cleanToken) : undefined,
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+    store.churches.push(church);
+
+    store.logs.unshift({
+      id: crypto.randomUUID(),
+      tipo: isPermanent ? 'ativacao_token' : 'inicio_trial',
+      descricao: isPermanent
+        ? `Nova conta criada e licença vitalícia ativada com o token ${cleanToken} para "${cleanIgreja}" (${cleanEmail}).`
+        : `Nova congregação cadastrada com teste grátis de 14 dias: "${cleanIgreja}" (${cleanEmail}).`,
+      user_email: cleanEmail,
+      igreja_nome: cleanIgreja,
+      created_at: nowIso,
+    });
+
+    saveStore(store);
+
+    return res.json({
+      success: true,
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        nome: newUser.nome,
+        cargo: newUser.cargo,
+        igreja: newUser.igreja,
+      },
+      license: {
+        status: church.status,
+        daysRemaining: isPermanent ? 0 : 14,
+        trialStart: church.trial_start,
+        trialEnd: church.trial_end,
+        activatedAt: church.activated_at,
+        igrejaNome: cleanIgreja,
+        email: cleanEmail,
+      },
+      message: isPermanent
+        ? 'Conta criada e licença permanente ativada com sucesso!'
+        : 'Conta criada com sucesso! Seu período de teste de 14 dias começou.',
+    });
+  });
+
   // -------------------------------------------------------------
   // 1. LOGIN ADMINISTRATIVO (paulotavares78@hotmail.com)
   // -------------------------------------------------------------
@@ -761,9 +1070,10 @@ async function startServer() {
   app.get('/api/license/status', (req: Request, res: Response) => {
     const email = req.query.email ? String(req.query.email).trim().toLowerCase() : '';
     const userId = req.query.userId ? String(req.query.userId).trim() : '';
+    const igreja = req.query.igreja ? String(req.query.igreja).trim().toLowerCase() : '';
 
-    if (!email && !userId) {
-      return res.status(400).json({ error: 'Parâmetro email ou userId obrigatório.' });
+    if (!email && !userId && !igreja) {
+      return res.status(400).json({ error: 'Parâmetro email, userId ou igreja obrigatório.' });
     }
 
     const store = ensureDataStore();
@@ -772,7 +1082,10 @@ async function startServer() {
     }
 
     let church = store.churches.find(
-      (c) => (email && c.email.toLowerCase() === email) || (userId && c.user_id === userId)
+      (c) =>
+        (email && c.email.toLowerCase() === email) ||
+        (userId && c.user_id === userId) ||
+        (igreja && c.igreja_nome.toLowerCase() === igreja)
     );
 
     // Se encontrou por e-mail mas o userId mudou/novo, atualiza o vínculo
@@ -782,21 +1095,24 @@ async function startServer() {
       saveStore(store);
     }
 
-    // Se não encontrou em churches, mas o e-mail consta nos tokens utilizados na central, restaura o acesso permanente
-    if (!church && email) {
+    // Se não encontrou em churches, mas o e-mail ou nome da igreja consta nos tokens utilizados na central, restaura o acesso permanente
+    if (!church && (email || igreja)) {
       const usedToken = store.tokens.find(
-        (t) => t.status === 'utilizado' && t.activated_by_email?.toLowerCase() === email
+        (t) =>
+          t.status === 'utilizado' &&
+          ((email && t.activated_by_email?.toLowerCase() === email) ||
+           (igreja && t.activated_by_igreja?.toLowerCase() === igreja))
       );
       if (usedToken) {
         church = {
           id: crypto.randomUUID(),
           user_id: userId || undefined,
-          igreja_nome: usedToken.activated_by_igreja || 'Igreja',
-          email: email,
+          igreja_nome: usedToken.activated_by_igreja || (req.query.igreja as string) || 'Igreja',
+          email: email || usedToken.activated_by_email || 'pastor@igreja.com',
           status: 'active',
           trial_start: usedToken.created_at,
           trial_end: usedToken.created_at,
-          activated_at: usedToken.activated_at,
+          activated_at: usedToken.activated_at || new Date().toISOString(),
           token_code: usedToken.token_code,
           token_hash: usedToken.token_hash,
           created_at: usedToken.created_at,

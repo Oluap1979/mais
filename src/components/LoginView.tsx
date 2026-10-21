@@ -223,7 +223,34 @@ export function LoginView({
         return;
       }
 
-      // 1. Verificar credencial pastoral padrão
+      // 1. Autenticação Centralizada no Servidor
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, password: senha }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            db.setUser(data.user);
+            if (data.license) {
+              localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(data.license));
+            }
+            toastSuccess('✅ Login efetuado com sucesso!');
+            onLoginSuccess(data.user);
+            return;
+          }
+        } else if (res.status === 401) {
+          toastError('❌ Senha incorreta. Por favor, verifique a senha digitada.');
+          return;
+        }
+      } catch (authErr) {
+        console.warn('Erro ao autenticar no servidor central:', authErr);
+      }
+
+      // 2. Fallback de credencial pastoral padrão
       if (
         cleanEmail === DEFAULT_CREDENTIALS.email.toLowerCase() &&
         (senha === DEFAULT_CREDENTIALS.password || senha === 'Password123!' || senha === '123456')
@@ -235,7 +262,7 @@ export function LoginView({
         return;
       }
 
-      // 2. Verificar na lista de contas cadastradas do sistema
+      // 3. Fallback de contas locais
       const registeredUsers = getRegisteredUsers();
       const matched = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
 
@@ -258,38 +285,7 @@ export function LoginView({
         }
       }
 
-      // 3. Tentar Supabase Auth
-      const client = getSupabaseClient();
-      if (client) {
-        try {
-          const authRes = await client.auth.signInWithPassword({
-            email: cleanEmail,
-            password: senha,
-          });
-
-          if (!authRes.error && authRes.data?.user) {
-            const nome = authRes.data.user.user_metadata?.nome || cleanEmail.split('@')[0];
-            const cargo = authRes.data.user.user_metadata?.cargo || 'Pastor Titular';
-            const igreja = authRes.data.user.user_metadata?.igreja || 'Mais Igreja';
-
-            const user: UserSession = {
-              id: authRes.data.user.id,
-              email: authRes.data.user.email || cleanEmail,
-              nome,
-              cargo,
-              igreja,
-            };
-            db.setUser(user);
-            toastSuccess('✅ Login efetuado com sucesso!');
-            onLoginSuccess(user);
-            return;
-          }
-        } catch {
-          // ignora
-        }
-      }
-
-      toastError('❌ Este e-mail não possui cadastro. Crie sua conta gratuita na aba "Testar Grátis 14 Dias".');
+      toastError('❌ Este e-mail não possui cadastro. Crie sua conta na aba de cadastro.');
     } catch (err: any) {
       console.error(err);
       toastError('❌ Não foi possível realizar o login.');
@@ -306,78 +302,56 @@ export function LoginView({
     }
 
     const cleanEmail = regEmail.trim().toLowerCase();
-    const existingUsers = getRegisteredUsers();
-    if (existingUsers.some((u) => u.email.toLowerCase() === cleanEmail)) {
-      toastError('❌ Este e-mail já está cadastrado. Acesse a aba "Acessar Conta".');
-      return;
-    }
-
     onSetLoading(true);
 
     try {
-      const createdUserId = generateUUID();
-
-      // Se for Opção B (Já tenho um token), valida e ativa no servidor
-      if (activeTab === 'token') {
-        try {
-          await db.activateToken({
-            token: regToken.trim(),
-            email: cleanEmail,
-            igreja_nome: regIgreja.trim(),
-            responsavel_nome: regNome.trim(),
-            cargo: regCargo,
-            user_id: createdUserId,
-          });
-        } catch (tokenErr: any) {
-          toastError(`❌ ${tokenErr.message || 'Token inválido ou já utilizado.'}`);
-          onSetLoading(false);
-          return;
-        }
-      } else {
-        // Opção A (Testar grátis por 14 dias)
-        try {
-          await db.startTrial({
-            email: cleanEmail,
-            igreja_nome: regIgreja.trim(),
-            responsavel_nome: regNome.trim(),
-            cargo: regCargo,
-            user_id: createdUserId,
-          });
-        } catch (trialErr: any) {
-          toastError(`❌ ${trialErr.message || 'Erro ao iniciar período de teste.'}`);
-          onSetLoading(false);
-          return;
-        }
-      }
-
-      // Salva conta registrada localmente
-      saveRegisteredUser({
-        id: createdUserId,
-        email: cleanEmail,
-        password: regSenha,
-        nome: regNome.trim(),
-        cargo: regCargo,
-        igreja: regIgreja.trim(),
-        createdAt: new Date().toISOString(),
+      // Registro Centralizado no Servidor
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          password: regSenha,
+          nome: regNome.trim(),
+          igreja: regIgreja.trim(),
+          cargo: regCargo,
+          token: activeTab === 'token' ? regToken.trim() : undefined,
+        }),
       });
 
-      const newUser: UserSession = {
-        id: createdUserId,
-        email: cleanEmail,
-        nome: regNome.trim(),
-        cargo: regCargo,
-        igreja: regIgreja.trim(),
-      };
+      const data = await res.json();
+      if (!res.ok) {
+        toastError(`❌ ${data.error || 'Erro ao processar o cadastro.'}`);
+        onSetLoading(false);
+        return;
+      }
 
-      db.setUser(newUser);
-      toastSuccess(
-        activeTab === 'token'
-          ? '🎉 Conta criada e licença permanente ativada com sucesso!'
-          : '🎉 Conta criada com sucesso! Seu teste grátis de 14 dias foi iniciado.'
-      );
-      onLoginSuccess(newUser);
+      if (data.user) {
+        db.setUser(data.user);
+        if (data.license) {
+          localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(data.license));
+        }
+
+        saveRegisteredUser({
+          id: data.user.id,
+          email: cleanEmail,
+          password: regSenha,
+          nome: regNome.trim(),
+          cargo: regCargo,
+          igreja: regIgreja.trim(),
+          createdAt: new Date().toISOString(),
+        });
+
+        toastSuccess(
+          activeTab === 'token'
+            ? '🎉 Conta criada e licença permanente ativada com sucesso!'
+            : '🎉 Conta criada com sucesso! Seu teste grátis de 14 dias foi iniciado.'
+        );
+        onLoginSuccess(data.user);
+        return;
+      }
     } catch (err: any) {
-      toastError('❌ Erro ao processar o cadastro. Tente novamente.');
+      toastError('❌ Erro ao conectar ao servidor central. Tente novamente.');
     } finally {
       onSetLoading(false);
     }
