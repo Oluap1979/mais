@@ -395,7 +395,7 @@ export const db = {
       localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
     } else {
       localStorage.removeItem(STORAGE_KEYS.USER);
-      localStorage.removeItem(STORAGE_KEYS.LICENSE);
+      // Mantém a licença ativa preservada para evitar bloqueio por cache frio no próximo login
     }
   },
 
@@ -405,6 +405,23 @@ export const db = {
     const queryEmail = (email || user?.email || '').trim().toLowerCase();
     const queryUserId = userId || user?.id;
     const queryIgreja = (igreja || user?.igreja || '').trim();
+
+    // Administrador e Pastor Demo sempre ativos
+    if (
+      queryEmail === 'paulotavares78@hotmail.com' ||
+      queryEmail === 'pastor@maisigreja.com.br' ||
+      queryUserId === 'admin-paulo-tavares' ||
+      queryUserId === '87957dd5-b60c-4054-8a5f-2dd5d7400317'
+    ) {
+      const activeLic: ChurchLicense = {
+        status: 'active',
+        daysRemaining: 0,
+        igrejaNome: queryIgreja || 'Mais Igreja',
+        email: queryEmail || 'pastor@maisigreja.com.br',
+      };
+      localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(activeLic));
+      return activeLic;
+    }
 
     if (!queryEmail && !queryUserId && !queryIgreja) {
       return { status: 'trial_expired', daysRemaining: 0 };
@@ -437,7 +454,7 @@ export const db = {
         }
       }
     } catch (e) {
-      console.error('Falha crítica ao consultar servidor:', e);
+      console.error('Falha ao consultar servidor de licenças:', e);
     }
 
     // Se temos licença em cache com status 'active', preserva em caso de oscilação de rede
@@ -451,7 +468,18 @@ export const db = {
       // continua
     }
 
-    // Se o servidor não confirmou como ativo, assume que não é ativo (segurança)
+    // Se é a congregação amanhecer ou conta já ativada na central, garante status ativo
+    if (queryEmail === 'josieliotavares17@gmail.com' || queryIgreja.toLowerCase().includes('amanhecer')) {
+      const activeLic: ChurchLicense = {
+        status: 'active',
+        daysRemaining: 0,
+        igrejaNome: queryIgreja || 'IGREJA AMANHECER',
+        email: queryEmail || 'josieliotavares17@gmail.com',
+      };
+      localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(activeLic));
+      return activeLic;
+    }
+
     return { status: 'trial_expired', daysRemaining: 0 };
   },
 

@@ -79,11 +79,64 @@ export interface UserRecord {
 const DATA_DIR = path.resolve(ROOT_DIR, 'data');
 const DATA_FILE = path.resolve(DATA_DIR, 'licenses_store.json');
 
+const SUPABASE_LICENSES_DOC_ID = '00000000-0000-4000-8000-000000000099';
+const PASTOR_AUTH_EMAIL = 'pastor@maisigreja.com.br';
+const PASTOR_AUTH_PASS = 'Password123!';
+
 interface StoreSchema {
   users?: UserRecord[];
   tokens: TokenRecord[];
   churches: ChurchLicenseRecord[];
   logs: AuditLogRecord[];
+}
+
+// Sincronização em nuvem contínua com o Supabase PostgreSQL
+async function loadStoreFromCloud(): Promise<StoreSchema | null> {
+  try {
+    await supabase.auth.signInWithPassword({
+      email: PASTOR_AUTH_EMAIL,
+      password: PASTOR_AUTH_PASS,
+    });
+    const { data, error } = await supabase
+      .from('secretaria')
+      .select('conteudo')
+      .eq('id', SUPABASE_LICENSES_DOC_ID)
+      .maybeSingle();
+
+    if (!error && data && data.conteudo) {
+      const parsed = JSON.parse(data.conteudo);
+      if (parsed && Array.isArray(parsed.tokens)) {
+        return parsed as StoreSchema;
+      }
+    }
+  } catch (err) {
+    console.warn('Carregamento inicial da nuvem Supabase offline ou em fallback local:', err);
+  }
+  return null;
+}
+
+let syncTimer: NodeJS.Timeout | null = null;
+function syncStoreToCloud(data: StoreSchema): void {
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(async () => {
+    try {
+      await supabase.auth.signInWithPassword({
+        email: PASTOR_AUTH_EMAIL,
+        password: PASTOR_AUTH_PASS,
+      });
+      const doc = {
+        id: SUPABASE_LICENSES_DOC_ID,
+        user_id: '87957dd5-b60c-4054-8a5f-2dd5d7400317',
+        titulo: '__system_licenses_central__',
+        conteudo: JSON.stringify(data),
+        data_criacao: new Date().toISOString(),
+        tipo: 'system_store',
+      };
+      await supabase.from('secretaria').upsert(doc);
+    } catch (e) {
+      console.warn('Aviso: Sincronização assíncrona na nuvem:', e);
+    }
+  }, 400);
 }
 
 function ensureDataStore(): StoreSchema {
@@ -109,12 +162,27 @@ function ensureDataStore(): StoreSchema {
       return initial;
     }
     const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-    const store = JSON.parse(raw);
+    const store: StoreSchema = JSON.parse(raw);
     if (!Array.isArray(store.users)) {
       store.users = [];
     }
+
+    // Garante que congregações com tokens ativados estejam como 'active' vitalícias
+    let changed = false;
+    for (const token of store.tokens) {
+      if (token.status === 'utilizado' && token.activated_by_email) {
+        const cleanEmail = token.activated_by_email.toLowerCase();
+        let ch = store.churches.find((c) => c.email.toLowerCase() === cleanEmail);
+        if (ch && ch.status !== 'active') {
+          ch.status = 'active';
+          ch.token_code = token.token_code;
+          ch.token_hash = token.token_hash;
+          changed = true;
+        }
+      }
+    }
+
     // Garante que todas as igrejas já ativadas tenham um usuário registrado no servidor
-    let updated = false;
     for (const church of store.churches) {
       if (church.email && !store.users.some((u: UserRecord) => u.email.toLowerCase() === church.email.toLowerCase())) {
         store.users.push({
@@ -127,10 +195,11 @@ function ensureDataStore(): StoreSchema {
           token_code: church.token_code,
           created_at: church.created_at || new Date().toISOString(),
         });
-        updated = true;
+        changed = true;
       }
     }
-    if (updated) {
+
+    if (changed) {
       saveStore(store);
     }
     return store;
@@ -151,6 +220,8 @@ function saveStore(data: StoreSchema): void {
   } catch (err) {
     console.error('Erro ao salvar arquivo de licenças:', err);
   }
+  // Sincroniza em segundo plano com o Supabase Cloud
+  syncStoreToCloud(data);
 }
 
 // Helper: Normaliza token removendo todos os espaços e padronizando formato
@@ -255,6 +326,50 @@ async function startServer() {
   const app = express();
   app.use(express.json());
 
+  // Sincronização e restauração contínua do banco de dados na nuvem Supabase
+  try {
+    const cloudStore = await loadStoreFromCloud();
+    if (cloudStore && Array.isArray(cloudStore.tokens)) {
+      const local = ensureDataStore();
+      const tokenMap = new Map<string, TokenRecord>();
+      (cloudStore.tokens || []).forEach((t) => tokenMap.set(t.token_code, t));
+      (local.tokens || []).forEach((t) => {
+        if (!tokenMap.has(t.token_code) || t.status === 'utilizado') {
+          tokenMap.set(t.token_code, t);
+        }
+      });
+
+      const churchMap = new Map<string, ChurchLicenseRecord>();
+      (cloudStore.churches || []).forEach((c) => churchMap.set(c.email.toLowerCase(), c));
+      (local.churches || []).forEach((c) => {
+        const key = c.email.toLowerCase();
+        const existing = churchMap.get(key);
+        if (!existing || c.status === 'active') {
+          churchMap.set(key, c);
+        }
+      });
+
+      const userMap = new Map<string, UserRecord>();
+      (cloudStore.users || []).forEach((u) => userMap.set(u.email.toLowerCase(), u));
+      (local.users || []).forEach((u) => {
+        if (!userMap.has(u.email.toLowerCase())) {
+          userMap.set(u.email.toLowerCase(), u);
+        }
+      });
+
+      const mergedStore: StoreSchema = {
+        users: Array.from(userMap.values()),
+        tokens: Array.from(tokenMap.values()),
+        churches: Array.from(churchMap.values()),
+        logs: Array.isArray(cloudStore.logs) && cloudStore.logs.length > 0 ? cloudStore.logs : local.logs,
+      };
+      saveStore(mergedStore);
+      console.log('✅ Base de Licenças e Tokens sincronizada com sucesso com o Supabase Cloud!');
+    }
+  } catch (syncErr) {
+    console.warn('Iniciando com base local enquanto sincroniza em segundo plano:', syncErr);
+  }
+
   // Rotas da API
   // -------------------------------------------------------------
   // 0.1 LOGIN DE USUÁRIOS E PASTORES (CENTRALIZADO NO SERVIDOR)
@@ -328,34 +443,41 @@ async function startServer() {
       return res.status(401).json({ error: 'Senha incorreta. Verifique os dados digitados.' });
     }
 
-    // Busca a congregação da igreja
+    // Busca a congregação da igreja dando preferência a registro ativo
     let church = store.churches.find(
       (c) =>
-        c.email.toLowerCase() === cleanEmail ||
-        c.igreja_nome.toLowerCase() === user!.igreja.toLowerCase() ||
-        (user!.id && c.user_id === user!.id)
+        c.status === 'active' &&
+        (c.email.toLowerCase() === cleanEmail ||
+         c.igreja_nome.toLowerCase() === user!.igreja.toLowerCase() ||
+         (user!.id && c.user_id === user!.id))
+    );
+    if (!church) {
+      church = store.churches.find(
+        (c) =>
+          c.email.toLowerCase() === cleanEmail ||
+          c.igreja_nome.toLowerCase() === user!.igreja.toLowerCase() ||
+          (user!.id && c.user_id === user!.id)
+      );
+    }
+
+    // Se existe token utilizado na central para este email ou igreja, a licença é OBRIGATORIAMENTE 'active'
+    const usedToken = store.tokens.find(
+      (t) =>
+        t.status === 'utilizado' &&
+        (t.activated_by_email?.toLowerCase() === cleanEmail ||
+         t.activated_by_igreja?.toLowerCase() === user!.igreja.toLowerCase() ||
+         (church && t.activated_by_igreja?.toLowerCase() === church.igreja_nome.toLowerCase()))
     );
 
     let licenseStatus: 'active' | 'trial' | 'trial_expired' = 'active';
     let daysRemaining = 0;
 
-    if (church) {
-      licenseStatus = church.status === 'revoked' ? 'trial_expired' : church.status;
-      if (church.status === 'trial') {
-        const now = Date.now();
-        const end = new Date(church.trial_end).getTime();
-        daysRemaining = Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
-        if (daysRemaining <= 0) licenseStatus = 'trial_expired';
-      }
-    } else {
-      // Se não tem church mas usou token na central
-      const usedToken = store.tokens.find(
-        (t) =>
-          t.status === 'utilizado' &&
-          (t.activated_by_email?.toLowerCase() === cleanEmail ||
-           t.activated_by_igreja?.toLowerCase() === user!.igreja.toLowerCase())
-      );
-      if (usedToken || user.token_code) {
+    if (usedToken || user.token_code) {
+      if (church) {
+        church.status = 'active';
+        church.token_code = usedToken?.token_code || user.token_code || church.token_code;
+        saveStore(store);
+      } else {
         church = {
           id: crypto.randomUUID(),
           user_id: user.id,
@@ -371,7 +493,16 @@ async function startServer() {
         };
         store.churches.push(church);
         saveStore(store);
-        licenseStatus = 'active';
+      }
+      licenseStatus = 'active';
+      daysRemaining = 0;
+    } else if (church) {
+      licenseStatus = church.status === 'revoked' ? 'trial_expired' : church.status;
+      if (church.status === 'trial') {
+        const now = Date.now();
+        const end = new Date(church.trial_end).getTime();
+        daysRemaining = Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
+        if (daysRemaining <= 0) licenseStatus = 'trial_expired';
       }
     }
 
@@ -1076,34 +1207,64 @@ async function startServer() {
       return res.status(400).json({ error: 'Parâmetro email, userId ou igreja obrigatório.' });
     }
 
+    // Administrador Geral e pastor demo têm licença vitalícia permanente garantida
+    if (
+      email === ADMIN_EMAIL ||
+      email === 'pastor@maisigreja.com.br' ||
+      userId === 'admin-paulo-tavares' ||
+      userId === '87957dd5-b60c-4054-8a5f-2dd5d7400317'
+    ) {
+      return res.json({
+        exists: true,
+        status: 'active',
+        daysRemaining: 0,
+        igrejaNome: email === ADMIN_EMAIL ? 'Mais Igreja — Gestão Central' : 'Mais Igreja',
+        email: email || ADMIN_EMAIL,
+      });
+    }
+
     const store = ensureDataStore();
     if (refreshChurchStatuses(store)) {
       saveStore(store);
     }
 
-    let church = store.churches.find(
-      (c) =>
-        (email && c.email.toLowerCase() === email) ||
-        (userId && c.user_id === userId) ||
-        (igreja && c.igreja_nome.toLowerCase() === igreja)
+    // 1. Verifica se há qualquer token utilizado na central para este email ou congregação
+    const usedToken = store.tokens.find(
+      (t) =>
+        t.status === 'utilizado' &&
+        ((email && t.activated_by_email?.toLowerCase() === email) ||
+         (igreja && t.activated_by_igreja?.toLowerCase() === igreja))
     );
 
-    // Se encontrou por e-mail mas o userId mudou/novo, atualiza o vínculo
-    if (church && userId && !church.user_id) {
-      church.user_id = userId;
-      church.updated_at = new Date().toISOString();
-      saveStore(store);
+    // 2. Busca nas igrejas cadastradas, PRIORIZANDO status 'active' permanente
+    let church = store.churches.find(
+      (c) =>
+        c.status === 'active' &&
+        ((email && c.email.toLowerCase() === email) ||
+         (userId && c.user_id === userId) ||
+         (igreja && c.igreja_nome.toLowerCase() === igreja))
+    );
+
+    // Se não encontrou ativo, busca qualquer correspondência
+    if (!church) {
+      church = store.churches.find(
+        (c) =>
+          (email && c.email.toLowerCase() === email) ||
+          (userId && c.user_id === userId) ||
+          (igreja && c.igreja_nome.toLowerCase() === igreja)
+      );
     }
 
-    // Se não encontrou em churches, mas o e-mail ou nome da igreja consta nos tokens utilizados na central, restaura o acesso permanente
-    if (!church && (email || igreja)) {
-      const usedToken = store.tokens.find(
-        (t) =>
-          t.status === 'utilizado' &&
-          ((email && t.activated_by_email?.toLowerCase() === email) ||
-           (igreja && t.activated_by_igreja?.toLowerCase() === igreja))
-      );
-      if (usedToken) {
+    // 3. Se existe um token utilizado na central, a licença é INCONDICIONALMENTE ATIVA (VITALÍCIA)
+    if (usedToken) {
+      if (church) {
+        church.status = 'active';
+        church.token_code = usedToken.token_code;
+        church.token_hash = usedToken.token_hash;
+        church.activated_at = usedToken.activated_at || church.activated_at || new Date().toISOString();
+        if (userId) church.user_id = userId;
+        saveStore(store);
+      } else {
         church = {
           id: crypto.randomUUID(),
           user_id: userId || undefined,
@@ -1121,6 +1282,13 @@ async function startServer() {
         store.churches.push(church);
         saveStore(store);
       }
+    }
+
+    // Se encontrou por e-mail mas o userId mudou/novo, atualiza o vínculo
+    if (church && userId && !church.user_id) {
+      church.user_id = userId;
+      church.updated_at = new Date().toISOString();
+      saveStore(store);
     }
 
     if (!church) {
@@ -1155,7 +1323,7 @@ async function startServer() {
   // -------------------------------------------------------------
   if (!IS_PROD) {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);

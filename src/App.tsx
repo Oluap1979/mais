@@ -42,8 +42,17 @@ function MainApp() {
   const [licenseModalOpen, setLicenseModalOpen] = useState(false);
   const [globalLoading, setGlobalLoading] = useState(false);
 
-  // Licença
-  const [license, setLicense] = useState<ChurchLicense | null>(null);
+  // Licença inicializada do cache para exibição instantânea sem atraso
+  const [license, setLicense] = useState<ChurchLicense | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.LICENSE);
+      if (stored) return JSON.parse(stored);
+    } catch {
+      // ignore
+    }
+    return null;
+  });
 
   // Modais acionáveis
   const [openModalMembro, setOpenModalMembro] = useState(false);
@@ -113,8 +122,12 @@ function MainApp() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleLoginSuccess = (loggedInUser: UserSession) => {
+  const handleLoginSuccess = (loggedInUser: UserSession, userLicense?: ChurchLicense) => {
     setUser(loggedInUser);
+    if (userLicense) {
+      setLicense(userLicense);
+      localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(userLicense));
+    }
     setAdminToken(null);
     localStorage.removeItem(STORAGE_KEYS.ADMIN_TOKEN);
     setCurrentPath('dashboard');

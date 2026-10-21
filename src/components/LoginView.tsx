@@ -30,11 +30,11 @@ import {
   STORAGE_KEYS,
 } from '../lib/supabase';
 import { useToast } from './ui/toast';
-import type { UserSession } from '../types/database';
+import type { UserSession, ChurchLicense } from '../types/database';
 
 interface LoginViewProps {
   initialMode?: 'login' | 'register';
-  onLoginSuccess: (user: UserSession) => void;
+  onLoginSuccess: (user: UserSession, license?: ChurchLicense) => void;
   onSetLoading: (loading: boolean) => void;
   onOpenAdminLogin: () => void;
   onAdminDirectLogin?: (token: string) => void;
@@ -239,7 +239,7 @@ export function LoginView({
               localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(data.license));
             }
             toastSuccess('✅ Login efetuado com sucesso!');
-            onLoginSuccess(data.user);
+            onLoginSuccess(data.user, data.license);
             return;
           }
         } else if (res.status === 401) {
@@ -347,7 +347,7 @@ export function LoginView({
             ? '🎉 Conta criada e licença permanente ativada com sucesso!'
             : '🎉 Conta criada com sucesso! Seu teste grátis de 14 dias foi iniciado.'
         );
-        onLoginSuccess(data.user);
+        onLoginSuccess(data.user, data.license);
         return;
       }
     } catch (err: any) {
