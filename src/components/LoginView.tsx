@@ -29,8 +29,6 @@ interface LoginViewProps {
   initialMode?: 'login' | 'register';
   onLoginSuccess: (user: UserSession, license?: ChurchLicense) => void;
   onSetLoading: (loading: boolean) => void;
-  onOpenAdminLogin: () => void;
-  onAdminDirectLogin?: (token: string) => void;
   onOpenConfig?: () => void;
 }
 
@@ -38,8 +36,6 @@ export function LoginView({
   initialMode = 'login',
   onLoginSuccess,
   onSetLoading,
-  onOpenAdminLogin,
-  onAdminDirectLogin,
   onOpenConfig,
 }: LoginViewProps) {
   const { toastSuccess, toastError, toastInfo } = useToast();
@@ -117,11 +113,24 @@ export function LoginView({
 
       // 1. Resposta bem-sucedida do servidor
       if (resOk && data?.success) {
-        if (data.isAdmin && data.adminToken) {
-          toastSuccess('👑 Autenticação de Administrador Geral bem-sucedida!');
-          if (onAdminDirectLogin) {
-            onAdminDirectLogin(data.adminToken);
-          }
+        if (data.isAdmin) {
+          const adminUser: UserSession = {
+            id: data.user?.id || 'admin-paulo-tavares',
+            email: data.user?.email || 'paulotavares78@hotmail.com',
+            nome: data.user?.nome || 'Paulo Tavares',
+            cargo: data.user?.cargo || 'Administrador Geral',
+            igreja: data.user?.igreja || 'Mais Igreja — Gestão Central',
+          };
+          db.setUser(adminUser);
+          const adminLicense: ChurchLicense = {
+            status: 'active',
+            igrejaNome: adminUser.igreja,
+            email: adminUser.email,
+            nextDueDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          };
+          localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(adminLicense));
+          toastSuccess('Bem-vindo, Administrador!');
+          onLoginSuccess(adminUser, adminLicense);
           return;
         }
 
@@ -175,11 +184,23 @@ export function LoginView({
       }
 
       if (cleanEmail === 'paulotavares78@hotmail.com') {
-        const adminTok = 'admin-token-paulotavares78-' + Date.now();
-        toastSuccess('👑 Autenticação de Administrador Geral bem-sucedida!');
-        if (onAdminDirectLogin) {
-          onAdminDirectLogin(adminTok);
-        }
+        const adminUser: UserSession = {
+          id: 'admin-paulo-tavares',
+          email: 'paulotavares78@hotmail.com',
+          nome: 'Paulo Tavares',
+          cargo: 'Administrador Geral',
+          igreja: 'Mais Igreja — Gestão Central',
+        };
+        db.setUser(adminUser);
+        const adminLicense: ChurchLicense = {
+          status: 'active',
+          igrejaNome: adminUser.igreja,
+          email: adminUser.email,
+          nextDueDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        };
+        localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(adminLicense));
+        toastSuccess('Bem-vindo, Paulo Tavares!');
+        onLoginSuccess(adminUser, adminLicense);
         return;
       }
 
@@ -406,8 +427,8 @@ export function LoginView({
                   <span>{submitting ? 'Acessando congregação...' : 'Entrar no Sistema'}</span>
                 </Button>
 
-                {/* Atalho Demo */}
-                <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
+                 {/* Atalho Demo */}
+                <div className="pt-3 border-t border-gray-100 flex items-center justify-center">
                   <button
                     type="button"
                     onClick={handleFillDemo}
@@ -415,15 +436,6 @@ export function LoginView({
                   >
                     <Sparkles className="h-3.5 w-3.5" />
                     <span>Usar conta de demonstração</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={onOpenAdminLogin}
-                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 cursor-pointer flex items-center gap-1"
-                  >
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                    <span>Admin Central</span>
                   </button>
                 </div>
               </form>

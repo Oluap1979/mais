@@ -12,8 +12,6 @@ import { CelulasView } from './components/CelulasView';
 import { FinanceiroView } from './components/FinanceiroView';
 import { SecretariaView } from './components/SecretariaView';
 import { SupabaseConfigModal } from './components/SupabaseConfigModal';
-import { AdminLoginModal } from './components/AdminLoginModal';
-import { AdminPanel } from './components/AdminPanel';
 import { SubscriptionModal } from './components/SubscriptionModal';
 import { SubscriptionLockView } from './components/SubscriptionLockView';
 import type { Membro, Celula, RegistroFinanceiro, DocumentoSecretaria, UserSession, ChurchLicense } from './types/database';
@@ -29,16 +27,10 @@ function MainApp() {
     return db.getUser();
   });
 
-  const [adminToken, setAdminToken] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    return localStorage.getItem(STORAGE_KEYS.ADMIN_TOKEN);
-  });
-
   const [currentPath, setCurrentPath] = useState<NavItemKey>('dashboard');
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [configModalOpen, setConfigModalOpen] = useState(false);
-  const [adminLoginModalOpen, setAdminLoginModalOpen] = useState(false);
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
   const [globalLoading, setGlobalLoading] = useState(false);
 
@@ -106,10 +98,10 @@ function MainApp() {
   }, [user]);
 
   useEffect(() => {
-    if (user && !adminToken) {
+    if (user) {
       loadLicenseAndData();
     }
-  }, [user, adminToken, loadLicenseAndData]);
+  }, [user, loadLicenseAndData]);
 
   const handleNavigate = (path: NavItemKey) => {
     if (license && license.status !== 'active') {
@@ -127,8 +119,6 @@ function MainApp() {
       setLicense(userLicense);
       localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(userLicense));
     }
-    setAdminToken(null);
-    localStorage.removeItem(STORAGE_KEYS.ADMIN_TOKEN);
     setCurrentPath('dashboard');
     window.history.pushState({}, '', '/dashboard');
   };
@@ -138,11 +128,6 @@ function MainApp() {
     setUser(null);
     setLicense(null);
     window.history.pushState({}, '', '/login');
-  };
-
-  const handleLogoutAdmin = () => {
-    localStorage.removeItem(STORAGE_KEYS.ADMIN_TOKEN);
-    setAdminToken(null);
   };
 
   // Handlers de dados
@@ -226,42 +211,6 @@ function MainApp() {
     }
   };
 
-  const isAdminUser = Boolean(
-    user?.email?.toLowerCase() === 'paulotavares78@hotmail.com' ||
-    (typeof window !== 'undefined' && localStorage.getItem(STORAGE_KEYS.ADMIN_TOKEN))
-  );
-
-  const handleOpenAdmin = () => {
-    const existing = localStorage.getItem(STORAGE_KEYS.ADMIN_TOKEN);
-    setAdminToken(existing || 'admin-token-paulotavares78-' + Date.now());
-  };
-
-  // Se o admin estiver autenticado com token válido, exibe o Painel Administrativo SaaS Kiwify
-  if (adminToken) {
-    return (
-      <ToastProvider>
-        {globalLoading && <LoadingSpinner fullScreen />}
-        <AdminPanel
-          adminToken={adminToken}
-          onLogoutAdmin={handleLogoutAdmin}
-          onSwitchToChurchApp={() => {
-            const adminUser: UserSession = {
-              id: 'admin-paulo-tavares',
-              email: 'paulotavares78@hotmail.com',
-              nome: 'Paulo Tavares',
-              cargo: 'Administrador Geral',
-              igreja: 'Mais Igreja — Gestão Central',
-            };
-            db.setUser(adminUser);
-            setUser(adminUser);
-            setAdminToken(null);
-            setCurrentPath('dashboard');
-          }}
-        />
-      </ToastProvider>
-    );
-  }
-
   // Se não houver usuário logado, exibe tela de login / cadastro de igreja
   if (!user) {
     return (
@@ -271,19 +220,7 @@ function MainApp() {
           initialMode={authMode}
           onLoginSuccess={handleLoginSuccess}
           onSetLoading={setGlobalLoading}
-          onOpenAdminLogin={() => setAdminLoginModalOpen(true)}
-          onAdminDirectLogin={(token) => {
-            setAdminToken(token);
-            localStorage.setItem(STORAGE_KEYS.ADMIN_TOKEN, token);
-          }}
           onOpenConfig={() => setConfigModalOpen(true)}
-        />
-        <AdminLoginModal
-          open={adminLoginModalOpen}
-          onOpenChange={setAdminLoginModalOpen}
-          onAdminLoginSuccess={(token) => {
-            setAdminToken(token);
-          }}
         />
         <SupabaseConfigModal
           open={configModalOpen}
@@ -307,7 +244,6 @@ function MainApp() {
         user={user}
         onLogout={handleLogout}
         onOpenConfig={() => setConfigModalOpen(true)}
-        onOpenAdmin={isAdminUser ? handleOpenAdmin : undefined}
         onOpenSubscription={() => setSubscriptionModalOpen(true)}
       />
 
@@ -322,7 +258,6 @@ function MainApp() {
             setMobileMenuOpen(false);
             setConfigModalOpen(true);
           }}
-          onOpenAdmin={isAdminUser ? handleOpenAdmin : undefined}
           onOpenSubscription={() => {
             setMobileMenuOpen(false);
             setSubscriptionModalOpen(true);
@@ -340,7 +275,6 @@ function MainApp() {
           user={user}
           license={license}
           onOpenConfig={() => setConfigModalOpen(true)}
-          onOpenAdmin={isAdminUser ? handleOpenAdmin : undefined}
           onOpenSubscriptionModal={() => setSubscriptionModalOpen(true)}
           onRefresh={loadLicenseAndData}
         />
@@ -424,13 +358,7 @@ function MainApp() {
         onRefreshed={loadLicenseAndData}
       />
 
-      <AdminLoginModal
-        open={adminLoginModalOpen}
-        onOpenChange={setAdminLoginModalOpen}
-        onAdminLoginSuccess={(token) => {
-          setAdminToken(token);
-        }}
-      />
+
 
       <SupabaseConfigModal
         open={configModalOpen}

@@ -9,7 +9,6 @@ interface HeaderProps {
   user: UserSession | null;
   license?: ChurchLicense | null;
   onOpenConfig?: () => void;
-  onOpenAdmin?: () => void;
   onOpenSubscriptionModal?: () => void;
   onRefresh?: () => Promise<void> | void;
 }
@@ -28,7 +27,6 @@ export function Header({
   user,
   license,
   onOpenConfig,
-  onOpenAdmin,
   onOpenSubscriptionModal,
 }: HeaderProps) {
   const current = titles[currentPath] || titles.dashboard;
@@ -105,18 +103,7 @@ export function Header({
           <span className="text-gray-900 font-semibold">{user?.igreja || 'Mais Igreja'}</span>
         </div>
 
-        {onOpenAdmin && (
-          <button
-            type="button"
-            onClick={onOpenAdmin}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors text-xs font-bold cursor-pointer shadow-2xs"
-            title="Acessar Painel do Administrador"
-          >
-            <ShieldCheck className="h-3.5 w-3.5 text-blue-600" />
-            <span className="hidden sm:inline">Painel Admin</span>
-            <span className="sm:hidden">Admin</span>
-          </button>
-        )}
+
 
         {onOpenConfig && (
           <button
