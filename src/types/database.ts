@@ -112,6 +112,20 @@ export interface ChurchLicense {
   daysRemaining?: number;
 }
 
+export interface SaaSPlanConfig {
+  id: string;
+  name: string;
+  price: number;
+  currency: string;
+  period: string;
+  description: string;
+  benefits: string[];
+  checkout_url?: string;
+  product_id?: string;
+  is_published: boolean;
+  updated_at: string;
+}
+
 export interface AgendaItem {
   id: string;
   user_id?: string;

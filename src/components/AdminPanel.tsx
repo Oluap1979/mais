@@ -20,6 +20,13 @@ import {
   Calendar,
   Layers,
   Send,
+  DollarSign,
+  Tag,
+  FileEdit,
+  Plus,
+  Trash2,
+  Eye,
+  Sparkles,
 } from 'lucide-react';
 import { useToast } from './ui/toast';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
@@ -27,11 +34,13 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select } from './ui/select';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
+import type { SaaSPlanConfig } from '../types/database';
 
 interface AdminPanelProps {
   adminToken: string;
   onLogoutAdmin: () => void;
   onSwitchToChurchApp?: () => void;
+  onOpenPlanos?: () => void;
 }
 
 interface SubscriptionStats {
@@ -95,10 +104,15 @@ interface AuditLogItem {
   created_at: string;
 }
 
-export function AdminPanel({ adminToken, onLogoutAdmin, onSwitchToChurchApp }: AdminPanelProps) {
+export function AdminPanel({
+  adminToken,
+  onLogoutAdmin,
+  onSwitchToChurchApp,
+  onOpenPlanos,
+}: AdminPanelProps) {
   const { toastSuccess, toastError, toastInfo } = useToast();
 
-  const [activeTab, setActiveTab] = useState<'subscriptions' | 'webhooks' | 'integration'>('subscriptions');
+  const [activeTab, setActiveTab] = useState<'subscriptions' | 'webhooks' | 'integration' | 'plans'>('subscriptions');
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<SubscriptionStats>({
     total: 0,
@@ -119,6 +133,34 @@ export function AdminPanel({ adminToken, onLogoutAdmin, onSwitchToChurchApp }: A
     productId: '',
     hasWebhookSecret: false,
   });
+
+  // Configurações do Plano e Preço Comercial (SaaS)
+  const [planConfig, setPlanConfig] = useState<SaaSPlanConfig>({
+    id: 'plano-mensal-saas',
+    name: 'Plano Mensal',
+    price: 50.0,
+    currency: 'BRL',
+    period: 'mensal',
+    description: 'Acesso completo a todos os módulos de gestão eclesiástica para sua igreja.',
+    benefits: [
+      'Gestão completa de membros e fichas ministeriais',
+      'Cadastro e acompanhamento de visitantes e obreiros',
+      'Gestão de células, congregações e departamentos',
+      'Agenda eclesiástica e calendário de cultos e eventos',
+      'Controle financeiro com livro-caixa e plano de contas',
+      'Registro de dízimos, ofertas e emissão de comprovantes',
+      'Emissão de relatórios administrativos e atas de secretaria',
+      'Gestão de usuários, cargos e permissões de acesso',
+      'Banco de dados em nuvem Supabase com segurança integrada',
+    ],
+    checkout_url: '',
+    product_id: '',
+    is_published: true,
+    updated_at: new Date().toISOString(),
+  });
+  const [planPriceInput, setPlanPriceInput] = useState('50,00');
+  const [planBenefitsInput, setPlanBenefitsInput] = useState('');
+  const [savingPlan, setSavingPlan] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -149,12 +191,15 @@ export function AdminPanel({ adminToken, onLogoutAdmin, onSwitchToChurchApp }: A
   const fetchAdminData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/subscriptions', {
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'x-admin-token': adminToken,
-        },
-      });
+      const [res, planRes] = await Promise.all([
+        fetch('/api/admin/subscriptions', {
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            'x-admin-token': adminToken,
+          },
+        }),
+        fetch('/api/plans/current'),
+      ]);
 
       if (!res.ok) {
         throw new Error('Falha ao autenticar no painel administrativo.');
@@ -176,6 +221,15 @@ export function AdminPanel({ adminToken, onLogoutAdmin, onSwitchToChurchApp }: A
         if (data.subscriptions && data.subscriptions.length > 0 && !simEmail) {
           setSimEmail(data.subscriptions[0].user_email);
           setSimChurchName(data.subscriptions[0].igreja_nome);
+        }
+      }
+
+      if (planRes.ok) {
+        const planData = await planRes.json();
+        if (planData.plan) {
+          setPlanConfig(planData.plan);
+          setPlanPriceInput(planData.plan.price ? planData.plan.price.toFixed(2).replace('.', ',') : '50,00');
+          setPlanBenefitsInput((planData.plan.benefits || []).join('\n'));
         }
       }
     } catch (err: any) {
@@ -206,12 +260,65 @@ export function AdminPanel({ adminToken, onLogoutAdmin, onSwitchToChurchApp }: A
       if (!res.ok) throw new Error(data.error || 'Erro ao salvar configurações.');
 
       toastSuccess('Configurações da Kiwify salvas com sucesso!');
-      if (data.config) setConfig(data.config);
+      if (data.config) {
+        setConfig(data.config);
+        // Mantém plano em sincronia
+        setPlanConfig((prev) => ({
+          ...prev,
+          checkout_url: data.config.checkoutUrl,
+          product_id: data.config.productId,
+        }));
+      }
       setFormWebhookSecret('');
     } catch (err: any) {
       toastError(err.message || 'Falha ao salvar configurações.');
     } finally {
       setSavingConfig(false);
+    }
+  };
+
+  const handleSavePlanConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingPlan(true);
+    try {
+      const benefitsArray = planBenefitsInput
+        .split('\n')
+        .map((b) => b.trim())
+        .filter(Boolean);
+
+      const res = await fetch('/api/admin/plans/current', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          name: planConfig.name.trim(),
+          price: planPriceInput,
+          currency: planConfig.currency || 'BRL',
+          period: planConfig.period || 'mensal',
+          description: planConfig.description.trim(),
+          benefits: benefitsArray,
+          checkout_url: planConfig.checkout_url.trim(),
+          product_id: planConfig.product_id.trim(),
+          is_published: planConfig.is_published,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao salvar configurações do plano.');
+
+      toastSuccess(`🎉 ${data.message || 'Configurações do Plano e Preço salvas com sucesso!'}`);
+      if (data.plan) {
+        setPlanConfig(data.plan);
+        setPlanPriceInput(data.plan.price.toFixed(2).replace('.', ','));
+        setPlanBenefitsInput((data.plan.benefits || []).join('\n'));
+      }
+      fetchAdminData();
+    } catch (err: any) {
+      toastError(err.message || 'Falha ao salvar configurações do plano.');
+    } finally {
+      setSavingPlan(false);
     }
   };
 

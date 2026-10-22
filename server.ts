@@ -106,6 +106,43 @@ export interface AuditLogRecord {
   created_at: string;
 }
 
+export interface SaaSPlanRecord {
+  id: string;
+  name: string;
+  price: number;
+  currency: string;
+  period: string;
+  description: string;
+  benefits: string[];
+  checkout_url?: string;
+  product_id?: string;
+  is_published: boolean;
+  updated_at: string;
+}
+
+export const DEFAULT_SAAS_PLAN: SaaSPlanRecord = {
+  id: 'plano-mensal-oficial',
+  name: 'Plano Mensal',
+  price: 50.00,
+  currency: 'BRL',
+  period: 'mensal',
+  description: 'Gestão completa para sua igreja crescer com organização, transparência financeira e comunhão.',
+  benefits: [
+    'Gestão completa de membros e congregação',
+    'Cadastro e acompanhamento de visitantes',
+    'Rede de células e grupos nos lares',
+    'Secretaria eclesiástica (atas, certificados e documentos oficiais)',
+    'Controle financeiro com dízimos, ofertas e gráficos',
+    'Agenda litúrgica e eventos comunitários',
+    'Relatórios administrativos detalhados',
+    'Gestão de usuários, permissões e pastores',
+    'Backup automático e sincronização em nuvem Supabase',
+    'Cobrança mensal recorrente com cancelamento simples na Kiwify',
+  ],
+  is_published: true,
+  updated_at: new Date().toISOString(),
+};
+
 // Arquivo de persistência local atômica
 const DATA_DIR = path.resolve(ROOT_DIR, 'data');
 const DATA_FILE = path.resolve(DATA_DIR, 'licenses_store.json');
@@ -119,6 +156,7 @@ interface StoreSchema {
   subscriptions: ChurchSubscriptionRecord[];
   webhook_logs: KiwifyWebhookLog[];
   logs: AuditLogRecord[];
+  plan_config?: SaaSPlanRecord;
   kiwify_config?: {
     checkout_url?: string;
     product_id?: string;
@@ -310,6 +348,7 @@ function ensureDataStore(): StoreSchema {
             created_at: new Date().toISOString(),
           },
         ],
+        plan_config: { ...DEFAULT_SAAS_PLAN },
       };
       migrateLegacyToSubscriptions(initial);
       fs.writeFileSync(DATA_FILE, JSON.stringify(initial, null, 2), 'utf-8');
@@ -318,7 +357,12 @@ function ensureDataStore(): StoreSchema {
 
     const raw = fs.readFileSync(DATA_FILE, 'utf-8');
     const store: StoreSchema = JSON.parse(raw);
-    const modified = migrateLegacyToSubscriptions(store);
+    let modified = migrateLegacyToSubscriptions(store);
+
+    if (!store.plan_config) {
+      store.plan_config = { ...DEFAULT_SAAS_PLAN };
+      modified = true;
+    }
 
     if (modified) {
       saveStore(store);
@@ -474,8 +518,95 @@ async function startServer() {
   }
 
   // ----------------------------------------------------------------------
-  // 1. ENDPOINTS DE CONFIGURAÇÃO E STATUS DE ASSINATURA (KIWIFY)
+  // 1. ENDPOINTS DE PLANOS E ASSINATURA SAAS (KIWIFY)
   // ----------------------------------------------------------------------
+
+  // Retorna os dados comerciais do plano de assinatura ativo (Público)
+  app.get('/api/plans/current', (_req: Request, res: Response) => {
+    const store = ensureDataStore();
+    const { checkoutUrl, productId } = getEffectiveKiwifyConfig(store);
+    const plan = store.plan_config || DEFAULT_SAAS_PLAN;
+
+    return res.json({
+      success: true,
+      plan: {
+        ...plan,
+        checkout_url: plan.checkout_url || checkoutUrl,
+        product_id: plan.product_id || productId,
+      },
+    });
+  });
+
+  // Atualização das configurações comerciais do plano pelo Administrador
+  app.post('/api/admin/plans/current', requireAdmin, (req: Request, res: Response) => {
+    const { name, price, currency, period, description, benefits, checkout_url, product_id, is_published } = req.body || {};
+    const store = ensureDataStore();
+    const current = store.plan_config || { ...DEFAULT_SAAS_PLAN };
+
+    let numericPrice = current.price;
+    if (price !== undefined && price !== null && price !== '') {
+      if (typeof price === 'number') {
+        numericPrice = price;
+      } else {
+        const cleanedStr = String(price)
+          .replace(/[R$\s]/g, '')
+          .replace(/\.(?=\d{3})/g, '')
+          .replace(',', '.');
+        const parsed = parseFloat(cleanedStr);
+        if (!isNaN(parsed) && parsed >= 0) {
+          numericPrice = parsed;
+        }
+      }
+    }
+
+    let parsedBenefits = current.benefits;
+    if (Array.isArray(benefits)) {
+      parsedBenefits = benefits.map((b) => String(b).trim()).filter(Boolean);
+    } else if (typeof benefits === 'string') {
+      parsedBenefits = benefits.split('\n').map((b) => b.trim()).filter(Boolean);
+    }
+
+    const updatedPlan: SaaSPlanRecord = {
+      id: current.id || 'plano-mensal-saas',
+      name: name !== undefined ? String(name).trim() : current.name,
+      price: numericPrice,
+      currency: currency !== undefined ? String(currency).trim() : current.currency,
+      period: period !== undefined ? String(period).trim() : current.period,
+      description: description !== undefined ? String(description).trim() : current.description,
+      benefits: parsedBenefits.length > 0 ? parsedBenefits : current.benefits,
+      checkout_url: checkout_url !== undefined ? String(checkout_url).trim() : (current.checkout_url || ''),
+      product_id: product_id !== undefined ? String(product_id).trim() : (current.product_id || ''),
+      is_published: is_published !== undefined ? Boolean(is_published) : current.is_published,
+      updated_at: new Date().toISOString(),
+    };
+
+    store.plan_config = updatedPlan;
+
+    // Sincroniza também com kiwify_config se checkout_url ou product_id foram atualizados
+    if (updatedPlan.checkout_url) {
+      store.kiwify_config = store.kiwify_config || { checkout_url: '', product_id: '', webhook_secret: '' };
+      store.kiwify_config.checkout_url = updatedPlan.checkout_url;
+    }
+    if (updatedPlan.product_id) {
+      store.kiwify_config = store.kiwify_config || { checkout_url: '', product_id: '', webhook_secret: '' };
+      store.kiwify_config.product_id = updatedPlan.product_id;
+    }
+
+    store.logs.unshift({
+      id: crypto.randomUUID(),
+      tipo: 'plano_comercial_atualizado',
+      descricao: `Plano comercial "${updatedPlan.name}" atualizado pelo Administrador para R$ ${updatedPlan.price.toFixed(2)}.`,
+      created_at: new Date().toISOString(),
+    });
+
+    saveStore(store);
+
+    return res.json({
+      success: true,
+      message: 'Configurações do Plano Mensal atualizadas com sucesso!',
+      plan: updatedPlan,
+    });
+  });
 
   // Retorna a URL de checkout e parâmetros seguros configurados para o frontend
   app.get('/api/subscription/config', (_req: Request, res: Response) => {
