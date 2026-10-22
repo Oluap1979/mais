@@ -10,6 +10,7 @@ export interface ToastMessage {
 interface ToastContextType {
   toastSuccess: (text?: string) => void;
   toastError: (text?: string) => void;
+  toastInfo: (text?: string) => void;
   showToast: (text: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -38,8 +39,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     showToast(text, 'error');
   }, [showToast]);
 
+  const toastInfo = useCallback((text = 'ℹ️ Informação.') => {
+    showToast(text, 'info');
+  }, [showToast]);
+
   return (
-    <ToastContext.Provider value={{ toastSuccess, toastError, showToast }}>
+    <ToastContext.Provider value={{ toastSuccess, toastError, toastInfo, showToast }}>
       {children}
       {/* Toast container */}
       <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0">

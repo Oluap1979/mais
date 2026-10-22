@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Group, Briefcase, DollarSign, Church, LogOut, Settings, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Users, Group, Briefcase, DollarSign, Church, LogOut, Settings, ShieldCheck, CreditCard } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { UserSession } from '../types/database';
 
@@ -11,6 +11,7 @@ interface SidebarProps {
   onLogout: () => void;
   onOpenConfig?: () => void;
   onOpenAdmin?: () => void;
+  onOpenSubscription?: () => void;
   isMobile?: boolean;
   onCloseMobile?: () => void;
 }
@@ -22,6 +23,7 @@ export function Sidebar({
   onLogout,
   onOpenConfig,
   onOpenAdmin,
+  onOpenSubscription,
   isMobile = false,
   onCloseMobile,
 }: SidebarProps) {
@@ -86,7 +88,7 @@ export function Sidebar({
         </nav>
       </div>
 
-      {/* Footer with User info & logout */}
+      {/* Footer with User info, Subscription & logout */}
       <div className="p-4 border-t border-slate-800 bg-slate-950/60">
         {user && (
           <div className="mb-3 px-1">
@@ -96,6 +98,19 @@ export function Sidebar({
         )}
 
         <div className="flex flex-col gap-1">
+          {onOpenSubscription && (
+            <button
+              onClick={() => {
+                onOpenSubscription();
+                if (isMobile && onCloseMobile) onCloseMobile();
+              }}
+              className="flex items-center gap-2.5 px-2.5 py-2 text-xs font-medium text-emerald-400 hover:text-white hover:bg-emerald-950/40 rounded-md transition-colors w-full cursor-pointer"
+            >
+              <CreditCard className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Assinatura Mensal</span>
+            </button>
+          )}
+
           {onOpenAdmin && (
             <button
               onClick={() => {

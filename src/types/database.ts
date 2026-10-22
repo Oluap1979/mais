@@ -54,17 +54,62 @@ export interface UserSession {
   igreja: string;
 }
 
-export type LicenseStatus = 'trial' | 'trial_expired' | 'active' | 'revoked';
+// ----------------------------------------------------------------------
+// NOVO MODELO DE ASSINATURAS MENSAIS RECORRENTES (KIWIFY SAAS)
+// ----------------------------------------------------------------------
+export type SubscriptionStatus =
+  | 'pending'    // Pagamento ou assinatura ainda não confirmados
+  | 'active'     // Assinatura válida e acesso liberado
+  | 'past_due'   // Pagamento vencido ou pendente de regularização
+  | 'canceled'   // Assinatura cancelada
+  | 'expired'    // Assinatura expirada
+  | 'suspended'; // Acesso suspenso por decisão administrativa
 
+export type LicenseStatus = SubscriptionStatus;
+
+export interface SubscriptionAuditEvent {
+  id: string;
+  event_type: string;
+  description: string;
+  kiwify_order_id?: string;
+  kiwify_subscription_id?: string;
+  data?: any;
+  created_at: string;
+}
+
+export interface ChurchSubscription {
+  id: string;
+  igreja_id: string;
+  igreja_nome: string;
+  user_id?: string;
+  user_email: string;
+  responsavel_nome?: string;
+  cargo?: string;
+  kiwify_product_id?: string;
+  kiwify_subscription_id?: string;
+  kiwify_order_id?: string;
+  status: SubscriptionStatus;
+  start_date: string;
+  last_payment_date?: string;
+  next_due_date?: string;
+  canceled_at?: string;
+  last_webhook_at?: string;
+  events_history?: SubscriptionAuditEvent[];
+  created_at: string;
+  updated_at: string;
+}
+
+// Compatibilidade de interface para componentes que exibem a assinatura da igreja
 export interface ChurchLicense {
-  status: LicenseStatus;
-  daysRemaining: number;
-  trialStart?: string;
-  trialEnd?: string;
-  activatedAt?: string;
-  tokenCode?: string;
+  status: 'active' | 'past_due' | 'canceled' | 'expired' | 'pending' | 'suspended';
+  subscriptionId?: string;
   igrejaNome?: string;
   email?: string;
+  nextDueDate?: string;
+  lastPaymentDate?: string;
+  kiwifySubscriptionId?: string;
+  checkoutUrl?: string;
+  daysRemaining?: number;
 }
 
 export interface AgendaItem {
@@ -77,4 +122,3 @@ export interface AgendaItem {
   cor?: 'blue' | 'green' | 'indigo' | 'purple' | 'amber' | 'rose';
   created_at?: string;
 }
-

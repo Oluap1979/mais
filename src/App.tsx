@@ -14,9 +14,9 @@ import { SecretariaView } from './components/SecretariaView';
 import { SupabaseConfigModal } from './components/SupabaseConfigModal';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminPanel } from './components/AdminPanel';
-import { LicenseActivationModal } from './components/LicenseActivationModal';
+import { SubscriptionModal } from './components/SubscriptionModal';
+import { SubscriptionLockView } from './components/SubscriptionLockView';
 import type { Membro, Celula, RegistroFinanceiro, DocumentoSecretaria, UserSession, ChurchLicense } from './types/database';
-import { Key, Clock, ShieldCheck, AlertTriangle } from 'lucide-react';
 
 function MainApp() {
   const { toastSuccess, toastError } = useToast();
@@ -39,10 +39,10 @@ function MainApp() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [adminLoginModalOpen, setAdminLoginModalOpen] = useState(false);
-  const [licenseModalOpen, setLicenseModalOpen] = useState(false);
+  const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
   const [globalLoading, setGlobalLoading] = useState(false);
 
-  // Licença inicializada do cache para exibição instantânea sem atraso
+  // Assinatura inicializada do cache para exibição instantânea
   const [license, setLicense] = useState<ChurchLicense | null>(() => {
     if (typeof window === 'undefined') return null;
     try {
@@ -58,7 +58,7 @@ function MainApp() {
   const [openModalMembro, setOpenModalMembro] = useState(false);
   const [openModalCelula, setOpenModalCelula] = useState(false);
 
-  // Estados de dados
+  // Estados de dados eclesiásticos
   const [membros, setMembros] = useState<Membro[]>([]);
   const [celulas, setCelulas] = useState<Celula[]>([]);
   const [financeiro, setFinanceiro] = useState<RegistroFinanceiro[]>([]);
@@ -77,7 +77,7 @@ function MainApp() {
     }
   }, []);
 
-  // Carregamento de licença e dados
+  // Carregamento de assinatura Kiwify e dados da congregação
   const loadLicenseAndData = useCallback(async () => {
     if (!user) return;
     setGlobalLoading(true);
@@ -85,20 +85,19 @@ function MainApp() {
       const lic = await db.getLicense(user.email, user.id, user.igreja);
       setLicense(lic);
 
-      if (lic.status === 'trial_expired') {
-        setLicenseModalOpen(true);
+      // Carrega dados da congregação se a assinatura estiver ativa
+      if (lic.status === 'active') {
+        const [mems, cels, fins, secs] = await Promise.all([
+          db.getMembros(),
+          db.getCelulas(),
+          db.getFinanceiro(),
+          db.getSecretaria(),
+        ]);
+        setMembros(mems);
+        setCelulas(cels);
+        setFinanceiro(fins);
+        setSecretaria(secs);
       }
-
-      const [mems, cels, fins, secs] = await Promise.all([
-        db.getMembros(),
-        db.getCelulas(),
-        db.getFinanceiro(),
-        db.getSecretaria(),
-      ]);
-      setMembros(mems);
-      setCelulas(cels);
-      setFinanceiro(fins);
-      setSecretaria(secs);
     } catch (err) {
       console.error('Erro ao carregar dados:', err);
     } finally {
@@ -113,8 +112,8 @@ function MainApp() {
   }, [user, adminToken, loadLicenseAndData]);
 
   const handleNavigate = (path: NavItemKey) => {
-    if (license?.status === 'trial_expired') {
-      setLicenseModalOpen(true);
+    if (license && license.status !== 'active') {
+      setSubscriptionModalOpen(true);
       return;
     }
     setCurrentPath(path);
@@ -237,7 +236,7 @@ function MainApp() {
     setAdminToken(existing || 'admin-token-paulotavares78-' + Date.now());
   };
 
-  // Se o admin estiver autenticado com token válido, mostra o Painel Administrativo
+  // Se o admin estiver autenticado com token válido, exibe o Painel Administrativo SaaS Kiwify
   if (adminToken) {
     return (
       <ToastProvider>
@@ -263,7 +262,7 @@ function MainApp() {
     );
   }
 
-  // Se não houver usuário logado, exibe tela de login / registro / teste grátis / token
+  // Se não houver usuário logado, exibe tela de login / cadastro de igreja
   if (!user) {
     return (
       <>
@@ -295,27 +294,11 @@ function MainApp() {
     );
   }
 
+  const isSubscriptionActive = license?.status === 'active';
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row antialiased text-gray-900 font-sans">
       {globalLoading && <LoadingSpinner fullScreen />}
-
-      {/* Banner de Aviso de Teste Grátis */}
-      {license && license.status === 'trial' && (
-        <div className="fixed top-0 inset-x-0 z-40 bg-amber-600 text-white px-4 py-2 text-xs font-semibold flex items-center justify-between shadow-md">
-          <div className="flex items-center gap-2 mx-auto">
-            <Clock className="h-4 w-4 shrink-0 animate-pulse" />
-            <span>
-              Período de Teste Grátis: Restam <strong className="underline">{license.daysRemaining} dia(s)</strong> para o fim do experimento de 14 dias.
-            </span>
-            <button
-              onClick={() => setLicenseModalOpen(true)}
-              className="ml-3 px-3 py-1 rounded bg-white text-amber-900 font-bold hover:bg-amber-50 transition-colors shadow-xs cursor-pointer"
-            >
-              Ativar Licença Permanente com Token
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Sidebar Desktop */}
       <Sidebar
@@ -325,6 +308,7 @@ function MainApp() {
         onLogout={handleLogout}
         onOpenConfig={() => setConfigModalOpen(true)}
         onOpenAdmin={isAdminUser ? handleOpenAdmin : undefined}
+        onOpenSubscription={() => setSubscriptionModalOpen(true)}
       />
 
       {/* Drawer Mobile */}
@@ -339,13 +323,17 @@ function MainApp() {
             setConfigModalOpen(true);
           }}
           onOpenAdmin={isAdminUser ? handleOpenAdmin : undefined}
+          onOpenSubscription={() => {
+            setMobileMenuOpen(false);
+            setSubscriptionModalOpen(true);
+          }}
           isMobile
           onCloseMobile={() => setMobileMenuOpen(false)}
         />
       </Drawer>
 
       {/* Conteúdo Principal */}
-      <div className={`flex-1 md:ml-[250px] flex flex-col min-w-0 min-h-screen ${license?.status === 'trial' ? 'pt-10' : ''}`}>
+      <div className="flex-1 md:ml-[250px] flex flex-col min-w-0 min-h-screen">
         <Header
           currentPath={currentPath}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
@@ -353,27 +341,18 @@ function MainApp() {
           license={license}
           onOpenConfig={() => setConfigModalOpen(true)}
           onOpenAdmin={isAdminUser ? handleOpenAdmin : undefined}
+          onOpenSubscriptionModal={() => setSubscriptionModalOpen(true)}
           onRefresh={loadLicenseAndData}
         />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-          {license?.status === 'trial_expired' ? (
-            <div className="p-8 bg-white rounded-2xl border border-rose-200 shadow-xl text-center max-w-xl mx-auto my-12 space-y-4">
-              <div className="h-16 w-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto shadow-xs">
-                <AlertTriangle className="h-8 w-8" />
-              </div>
-              <h2 className="text-xl font-bold text-gray-900">Seu Período de Teste Expirou</h2>
-              <p className="text-sm text-gray-600 leading-relaxed">
-                Os 14 dias de teste gratuito da sua congregação terminaram. Seus dados, membros e finanças estão preservados com segurança. Para continuar utilizando o sistema, ative sua licença permanente com o token fornecido pela administração.
-              </p>
-              <button
-                onClick={() => setLicenseModalOpen(true)}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl shadow-md transition-colors cursor-pointer inline-flex items-center gap-2"
-              >
-                <Key className="h-4 w-4" />
-                <span>Ativar Licença Permanente com Token</span>
-              </button>
-            </div>
+          {!isSubscriptionActive ? (
+            <SubscriptionLockView
+              user={user}
+              license={license}
+              onRefresh={loadLicenseAndData}
+              onLogout={handleLogout}
+            />
           ) : (
             <>
               {currentPath === 'dashboard' && (
@@ -436,22 +415,13 @@ function MainApp() {
         </main>
       </div>
 
-      {/* Modais de Licença e Configuração */}
-      <LicenseActivationModal
-        open={licenseModalOpen}
-        onOpenChange={setLicenseModalOpen}
+      {/* Modal de Detalhes da Assinatura Kiwify */}
+      <SubscriptionModal
+        open={subscriptionModalOpen}
+        onOpenChange={setSubscriptionModalOpen}
         user={user}
-        onActivated={() => {
-          setLicense({
-            status: 'active',
-            daysRemaining: 0,
-            activatedAt: new Date().toISOString(),
-            igrejaNome: user?.igreja,
-            email: user?.email,
-          });
-          loadLicenseAndData();
-        }}
-        isExpired={license?.status === 'trial_expired'}
+        license={license}
+        onRefreshed={loadLicenseAndData}
       />
 
       <AdminLoginModal

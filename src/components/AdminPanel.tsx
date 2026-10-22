@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   ShieldCheck,
-  Key,
+  CreditCard,
   Church,
   Clock,
   AlertTriangle,
@@ -9,17 +9,24 @@ import {
   Copy,
   LogOut,
   RefreshCw,
-  Plus,
   Search,
   History,
   XCircle,
   Check,
-  Sparkles,
+  ExternalLink,
+  Sliders,
+  Webhook,
+  Activity,
+  Calendar,
+  Layers,
+  Send,
 } from 'lucide-react';
 import { useToast } from './ui/toast';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Select } from './ui/select';
+import { Dialog, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 
 interface AdminPanelProps {
   adminToken: string;
@@ -27,50 +34,59 @@ interface AdminPanelProps {
   onSwitchToChurchApp?: () => void;
 }
 
-interface StatsData {
-  churches: {
-    total: number;
-    activeTrials: number;
-    expiredTrials: number;
-    activeLicenses: number;
-    revokedLicenses: number;
-  };
-  tokens: {
-    total: number;
-    available: number;
-    used: number;
-    revoked: number;
-  };
+interface SubscriptionStats {
+  total: number;
+  active: number;
+  past_due: number;
+  canceled: number;
+  expired: number;
+  suspended: number;
+  pending: number;
+  totalWebhooks: number;
 }
 
-interface TokenItem {
+interface ChurchSubscriptionItem {
   id: string;
-  token_code: string;
-  status: 'disponivel' | 'utilizado' | 'revogado';
-  created_at: string;
-  created_by: string;
-  activated_at?: string;
-  activated_by_igreja?: string;
-  activated_by_email?: string;
-  observacoes?: string;
-}
-
-interface ChurchItem {
-  id: string;
-  user_id?: string;
+  igreja_id: string;
   igreja_nome: string;
-  email: string;
+  user_id?: string;
+  user_email: string;
   responsavel_nome?: string;
   cargo?: string;
-  status: 'trial' | 'trial_expired' | 'active' | 'revoked';
-  trial_start: string;
-  trial_end: string;
-  activated_at?: string;
-  token_code?: string;
+  kiwify_product_id?: string;
+  kiwify_subscription_id?: string;
+  kiwify_order_id?: string;
+  status: 'active' | 'past_due' | 'canceled' | 'expired' | 'suspended' | 'pending';
+  start_date: string;
+  last_payment_date?: string;
+  next_due_date?: string;
+  canceled_at?: string;
+  last_webhook_at?: string;
+  events_history?: Array<{
+    id: string;
+    event_type: string;
+    description: string;
+    kiwify_order_id?: string;
+    kiwify_subscription_id?: string;
+    created_at: string;
+  }>;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WebhookLogItem {
+  id: string;
+  event_type: string;
+  order_id?: string;
+  subscription_id?: string;
+  customer_email?: string;
+  status: 'processed' | 'ignored' | 'error' | 'unauthorized';
+  message: string;
+  raw_payload_summary?: string;
   created_at: string;
 }
 
-interface LogItem {
+interface AuditLogItem {
   id: string;
   tipo: string;
   descricao: string;
@@ -79,1157 +95,521 @@ interface LogItem {
   created_at: string;
 }
 
-const STORAGE_KEYS_ADMIN = {
-  TOKENS: 'mais_igreja_admin_tokens',
-  CHURCHES: 'mais_igreja_admin_churches',
-  LOGS: 'mais_igreja_admin_logs',
-};
-
 export function AdminPanel({ adminToken, onLogoutAdmin, onSwitchToChurchApp }: AdminPanelProps) {
-  const { toastSuccess, toastError } = useToast();
+  const { toastSuccess, toastError, toastInfo } = useToast();
 
-  const [activeTab, setActiveTab] = useState<'tokens' | 'churches' | 'logs'>('tokens');
+  const [activeTab, setActiveTab] = useState<'subscriptions' | 'webhooks' | 'integration'>('subscriptions');
   const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState<StatsData>({
-    churches: { total: 0, activeTrials: 0, expiredTrials: 0, activeLicenses: 0, revokedLicenses: 0 },
-    tokens: { total: 0, available: 0, used: 0, revoked: 0 },
+  const [stats, setStats] = useState<SubscriptionStats>({
+    total: 0,
+    active: 0,
+    past_due: 0,
+    canceled: 0,
+    expired: 0,
+    suspended: 0,
+    pending: 0,
+    totalWebhooks: 0,
   });
 
-  // Dados
-  const [tokens, setTokens] = useState<TokenItem[]>([]);
-  const [churches, setChurches] = useState<ChurchItem[]>([]);
-  const [logs, setLogs] = useState<LogItem[]>([]);
+  const [subscriptions, setSubscriptions] = useState<ChurchSubscriptionItem[]>([]);
+  const [webhookLogs, setWebhookLogs] = useState<WebhookLogItem[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
+  const [config, setConfig] = useState<{ checkoutUrl: string; productId: string; hasWebhookSecret: boolean }>({
+    checkoutUrl: '',
+    productId: '',
+    hasWebhookSecret: false,
+  });
 
-  // Geração de Tokens
-  const [tokenQty, setTokenQty] = useState(1);
-  const [tokenNote, setTokenNote] = useState('');
-  const [generating, setGenerating] = useState(false);
-  const [lastGenerated, setLastGenerated] = useState<TokenItem[]>([]);
-  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [copiedText, setCopiedText] = useState<string | null>(null);
 
-  // Testador / Validador de Tokens
-  const [testTokenCode, setTestTokenCode] = useState('');
-  const [testingToken, setTestingToken] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    tested: boolean;
-    valid?: boolean;
-    status?: string;
-    message?: string;
-    churchName?: string;
-    churchEmail?: string;
-    date?: string;
-  } | null>(null);
+  // Modal de Histórico de Assinatura
+  const [selectedSub, setSelectedSub] = useState<ChurchSubscriptionItem | null>(null);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
 
-  // Filtros
-  const [tokenFilter, setTokenFilter] = useState<'todos' | 'disponivel' | 'utilizado' | 'revogado'>('todos');
-  const [tokenSearch, setTokenSearch] = useState('');
-  const [churchSearch, setChurchSearch] = useState('');
+  // Modal de Alteração Manual de Status
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [targetSub, setTargetSub] = useState<ChurchSubscriptionItem | null>(null);
+  const [newStatusChoice, setNewStatusChoice] = useState<'active' | 'past_due' | 'canceled' | 'suspended'>('active');
+  const [statusMotivo, setStatusMotivo] = useState('');
 
-  // Modais de confirmação
-  const [confirmRevokeChurch, setConfirmRevokeChurch] = useState<ChurchItem | null>(null);
-  const [confirmRevokeToken, setConfirmRevokeToken] = useState<TokenItem | null>(null);
+  // Simulador de Webhook
+  const [simEvent, setSimEvent] = useState<'order_approved' | 'subscription_late' | 'subscription_renewed' | 'subscription_canceled'>('order_approved');
+  const [simEmail, setSimEmail] = useState('');
+  const [simChurchName, setSimChurchName] = useState('');
+  const [simulating, setSimulating] = useState(false);
 
-  const loadData = useCallback(async () => {
+  // Configurações da Kiwify editáveis no Painel
+  const [formCheckoutUrl, setFormCheckoutUrl] = useState('');
+  const [formProductId, setFormProductId] = useState('');
+  const [formWebhookSecret, setFormWebhookSecret] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const fetchAdminData = useCallback(async () => {
     setLoading(true);
-    let loadedTokens: TokenItem[] = [];
-    let loadedChurches: ChurchItem[] = [];
-    let loadedLogs: LogItem[] = [];
-
-    const effectiveToken = adminToken || (typeof window !== 'undefined' ? localStorage.getItem('mais_igreja_admin_token') : '') || 'admin-token-paulotavares78';
-    const authHeaders: Record<string, string> = {
-      Authorization: `Bearer ${effectiveToken}`,
-      'x-admin-email': 'paulotavares78@hotmail.com',
-    };
-
-    // Tenta carregar da central API no servidor
     try {
-      const [resT, resC, resL] = await Promise.all([
-        fetch('/api/admin/tokens', { headers: authHeaders }),
-        fetch('/api/admin/churches', { headers: authHeaders }),
-        fetch('/api/admin/logs', { headers: authHeaders }),
-      ]);
+      const res = await fetch('/api/admin/subscriptions', {
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'x-admin-token': adminToken,
+        },
+      });
 
-      if (resT.ok) {
-        const d = await resT.json();
-        if (Array.isArray(d.tokens)) {
-          loadedTokens = d.tokens;
-          localStorage.setItem(STORAGE_KEYS_ADMIN.TOKENS, JSON.stringify(d.tokens));
+      if (!res.ok) {
+        throw new Error('Falha ao autenticar no painel administrativo.');
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        setStats(data.stats);
+        setSubscriptions(data.subscriptions || []);
+        setWebhookLogs(data.webhook_logs || []);
+        setAuditLogs(data.audit_logs || []);
+        if (data.config) {
+          setConfig(data.config);
+          setFormCheckoutUrl(data.config.checkoutUrl || '');
+          setFormProductId(data.config.productId || '');
+        }
+
+        // Preenche email para simulação caso esteja vazio
+        if (data.subscriptions && data.subscriptions.length > 0 && !simEmail) {
+          setSimEmail(data.subscriptions[0].user_email);
+          setSimChurchName(data.subscriptions[0].igreja_nome);
         }
       }
-      if (resC.ok) {
-        const d = await resC.json();
-        if (Array.isArray(d.churches)) {
-          loadedChurches = d.churches;
-          localStorage.setItem(STORAGE_KEYS_ADMIN.CHURCHES, JSON.stringify(d.churches));
-        }
-      }
-      if (resL.ok) {
-        const d = await resL.json();
-        if (Array.isArray(d.logs)) {
-          loadedLogs = d.logs;
-          localStorage.setItem(STORAGE_KEYS_ADMIN.LOGS, JSON.stringify(d.logs));
-        }
-      }
-    } catch (err) {
-      console.warn('Conexão offline, recorrendo ao cache local:', err);
+    } catch (err: any) {
+      toastError(err.message || 'Erro ao carregar dados administrativos.');
+    } finally {
+      setLoading(false);
     }
+  }, [adminToken, toastError, simEmail]);
 
-    // Se servidor não retornou por estar offline, carrega do cache local
-    if (loadedTokens.length === 0) {
-      try {
-        const local = localStorage.getItem(STORAGE_KEYS_ADMIN.TOKENS);
-        if (local) loadedTokens = JSON.parse(local);
-      } catch {
-        // ignora
-      }
+  const handleSaveKiwifyConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingConfig(true);
+    try {
+      const res = await fetch('/api/admin/kiwify-config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          checkoutUrl: formCheckoutUrl.trim(),
+          productId: formProductId.trim(),
+          webhookSecret: formWebhookSecret.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao salvar configurações.');
+
+      toastSuccess('Configurações da Kiwify salvas com sucesso!');
+      if (data.config) setConfig(data.config);
+      setFormWebhookSecret('');
+    } catch (err: any) {
+      toastError(err.message || 'Falha ao salvar configurações.');
+    } finally {
+      setSavingConfig(false);
     }
-    if (loadedChurches.length === 0) {
-      try {
-        const local = localStorage.getItem(STORAGE_KEYS_ADMIN.CHURCHES);
-        if (local) loadedChurches = JSON.parse(local);
-      } catch {
-        // ignora
-      }
-    }
-    if (loadedLogs.length === 0) {
-      try {
-        const local = localStorage.getItem(STORAGE_KEYS_ADMIN.LOGS);
-        if (local) loadedLogs = JSON.parse(local);
-      } catch {
-        // ignora
-      }
-    }
-
-    setTokens(loadedTokens);
-    setChurches(loadedChurches);
-    setLogs(loadedLogs);
-
-    // Calcula estatísticas
-    const totalC = loadedChurches.length;
-    const activeTrials = loadedChurches.filter((c) => c.status === 'trial').length;
-    const expiredTrials = loadedChurches.filter((c) => c.status === 'trial_expired').length;
-    const activeLicenses = loadedChurches.filter((c) => c.status === 'active').length;
-    const revokedLicenses = loadedChurches.filter((c) => c.status === 'revoked').length;
-
-    const totalT = loadedTokens.length;
-    const availableTokens = loadedTokens.filter((t) => t.status === 'disponivel').length;
-    const usedTokens = loadedTokens.filter((t) => t.status === 'utilizado').length;
-    const revokedTokens = loadedTokens.filter((t) => t.status === 'revogado').length;
-
-    setStats({
-      churches: { total: totalC, activeTrials, expiredTrials, activeLicenses, revokedLicenses },
-      tokens: { total: totalT, available: availableTokens, used: usedTokens, revoked: revokedTokens },
-    });
-
-    setLoading(false);
-  }, [adminToken]);
+  };
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    fetchAdminData();
+  }, [fetchAdminData]);
 
-  // Testador e Validador de Token
-  const handleTestToken = async (e: React.FormEvent) => {
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedText(label);
+    toastSuccess(`Copiado para a área de transferência: ${label}`);
+    setTimeout(() => setCopiedText(null), 2500);
+  };
+
+  const handleUpdateStatus = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = testTokenCode.trim().replace(/\s+/g, '').toUpperCase();
-    if (!clean) {
-      toastError('Digite o código do token para consultar.');
-      return;
-    }
-    setTestingToken(true);
+    if (!targetSub) return;
 
-    // 1. Procura na lista local de tokens já carregados
-    const found = tokens.find(
-      (t) => t.token_code.replace(/\s+/g, '').toUpperCase() === clean
-    );
-
-    if (found) {
-      setTestResult({
-        tested: true,
-        valid: found.status === 'disponivel',
-        status: found.status,
-        message:
-          found.status === 'disponivel'
-            ? 'Token VÁLIDO e pronto para ser ativado por qualquer congregação.'
-            : found.status === 'utilizado'
-            ? `Token já UTILIZADO anteriormente pela congregação "${found.activated_by_igreja || 'Igreja vinculada'}" (${found.activated_by_email || 'e-mail'}).`
-            : 'Token REVOGADO pela administração.',
-        churchName: found.activated_by_igreja,
-        churchEmail: found.activated_by_email,
-        date: found.activated_at || found.created_at,
-      });
-      setTestingToken(false);
-      return;
-    }
-
-    // 2. Consulta a API do servidor
     try {
-      const res = await fetch('/api/license/validate-token', {
+      const res = await fetch(`/api/admin/subscriptions/${targetSub.id}/status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: clean }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          status: newStatusChoice,
+          motivo: statusMotivo.trim(),
+        }),
       });
+
       const data = await res.json();
-      setTestResult({
-        tested: true,
-        valid: data.valid,
-        status: data.status,
-        message: data.message || data.error,
-      });
-    } catch {
-      setTestResult({
-        tested: true,
-        valid: clean.startsWith('MI-'),
-        status: clean.startsWith('MI-') ? 'disponivel' : 'invalido',
-        message: clean.startsWith('MI-')
-          ? 'Formato de token autêntico e válido para ativação permanente!'
-          : 'Token não localizado no sistema.',
-      });
+      if (!res.ok) throw new Error(data.error || 'Erro ao atualizar status.');
+
+      toastSuccess(`Status da igreja "${targetSub.igreja_nome}" alterado para ${newStatusChoice}.`);
+      setStatusModalOpen(false);
+      setStatusMotivo('');
+      fetchAdminData();
+    } catch (err: any) {
+      toastError(err.message || 'Falha ao alterar status.');
     }
-    setTestingToken(false);
   };
 
-  // Gerar Tokens (Híbrido Servidor + LocalStorage)
-  const handleGenerateTokens = async (e: React.FormEvent) => {
+  const handleSimulateWebhook = async (e: React.FormEvent) => {
     e.preventDefault();
-    setGenerating(true);
+    if (!simEmail.trim()) {
+      toastError('Informe o e-mail da igreja para a simulação.');
+      return;
+    }
 
-    const effectiveToken = adminToken || (typeof window !== 'undefined' ? localStorage.getItem('mais_igreja_admin_token') : '') || 'admin-token-paulotavares78';
-    let generated: TokenItem[] = [];
+    setSimulating(true);
     try {
-      const res = await fetch('/api/admin/tokens/generate', {
+      const res = await fetch('/api/admin/simulate-webhook', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${effectiveToken}`,
-          'x-admin-email': 'paulotavares78@hotmail.com',
+          Authorization: `Bearer ${adminToken}`,
         },
-        body: JSON.stringify({ count: tokenQty, observacoes: tokenNote }),
+        body: JSON.stringify({
+          event_type: simEvent,
+          email: simEmail.trim(),
+          church_name: simChurchName.trim(),
+        }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.tokens)) {
-          generated = data.tokens;
-        }
-      }
-    } catch {
-      // fallback local
-    }
 
-    if (generated.length === 0) {
-      // Geração local criptográfica robusta
-      const currentTokens = [...tokens];
-      for (let i = 0; i < tokenQty; i++) {
-        const bytes = new Uint8Array(8);
-        crypto.getRandomValues(bytes);
-        const hex = Array.from(bytes)
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('')
-          .toUpperCase();
-        const code = `MI-${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}`;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha na simulação.');
 
-        const tokenRec: TokenItem = {
-          id: 'token-' + Math.random(),
-          token_code: code,
-          status: 'disponivel',
-          created_at: new Date().toISOString(),
-          created_by: 'paulotavares78@hotmail.com',
-          observacoes: tokenNote || undefined,
-        };
-        generated.push(tokenRec);
-        currentTokens.unshift(tokenRec);
-      }
-      setTokens(currentTokens);
-      localStorage.setItem(STORAGE_KEYS_ADMIN.TOKENS, JSON.stringify(currentTokens));
-    } else {
-      setTokens((prev) => [...generated, ...prev]);
-    }
-
-    // Adiciona log local
-    const newLog: LogItem = {
-      id: 'log-' + Math.random(),
-      tipo: 'geracao_token',
-      descricao: `Gerado(s) ${generated.length} token(s) de ativação permanente.`,
-      user_email: 'paulotavares78@hotmail.com',
-      created_at: new Date().toISOString(),
-    };
-    const updatedLogs = [newLog, ...logs];
-    setLogs(updatedLogs);
-    localStorage.setItem(STORAGE_KEYS_ADMIN.LOGS, JSON.stringify(updatedLogs));
-
-    setLastGenerated(generated);
-    setTokenNote('');
-    toastSuccess(`✅ ${generated.length} token(s) permanente(s) gerado(s) com sucesso!`);
-    setGenerating(false);
-    loadData();
-  };
-
-  const handleCopyCode = (code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedToken(code);
-    toastSuccess(`📋 Token copiado: ${code}`);
-    setTimeout(() => {
-      setCopiedToken((prev) => (prev === code ? null : prev));
-    }, 3000);
-  };
-
-  // Revogar Token
-  const handleRevokeToken = async (tokenId: string) => {
-    const effectiveToken = adminToken || (typeof window !== 'undefined' ? localStorage.getItem('mais_igreja_admin_token') : '') || 'admin-token-paulotavares78';
-    try {
-      await fetch('/api/admin/tokens/revoke', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${effectiveToken}`,
-          'x-admin-email': 'paulotavares78@hotmail.com',
-        },
-        body: JSON.stringify({ tokenId }),
-      });
-    } catch {
-      // ignora
-    }
-
-    const updated = tokens.map((t) => (t.id === tokenId ? { ...t, status: 'revogado' as const } : t));
-    setTokens(updated);
-    localStorage.setItem(STORAGE_KEYS_ADMIN.TOKENS, JSON.stringify(updated));
-    toastSuccess('✅ Token revogado com sucesso!');
-    setConfirmRevokeToken(null);
-    loadData();
-  };
-
-  // Revogar Licença da Igreja
-  const handleRevokeChurch = async (churchId: string) => {
-    const effectiveToken = adminToken || (typeof window !== 'undefined' ? localStorage.getItem('mais_igreja_admin_token') : '') || 'admin-token-paulotavares78';
-    try {
-      await fetch('/api/admin/churches/revoke', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${effectiveToken}`,
-          'x-admin-email': 'paulotavares78@hotmail.com',
-        },
-        body: JSON.stringify({ churchId }),
-      });
-    } catch {
-      // ignora
-    }
-
-    const updated = churches.map((c) => (c.id === churchId ? { ...c, status: 'revoked' as const } : c));
-    setChurches(updated);
-    localStorage.setItem(STORAGE_KEYS_ADMIN.CHURCHES, JSON.stringify(updated));
-    toastSuccess('✅ Licença da igreja revogada!');
-    setConfirmRevokeChurch(null);
-    loadData();
-  };
-
-  // Ativar Licença Permanente para Igreja
-  const handleActivateChurch = async (churchId: string) => {
-    const effectiveToken = adminToken || (typeof window !== 'undefined' ? localStorage.getItem('mais_igreja_admin_token') : '') || 'admin-token-paulotavares78';
-    try {
-      await fetch('/api/admin/churches/activate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${effectiveToken}`,
-          'x-admin-email': 'paulotavares78@hotmail.com',
-        },
-        body: JSON.stringify({ churchId }),
-      });
-    } catch {
-      // ignora
-    }
-
-    const updated = churches.map((c) => (c.id === churchId ? { ...c, status: 'active' as const, activated_at: new Date().toISOString() } : c));
-    setChurches(updated);
-    localStorage.setItem(STORAGE_KEYS_ADMIN.CHURCHES, JSON.stringify(updated));
-    toastSuccess('✅ Licença permanente ativada para esta igreja!');
-    loadData();
-  };
-
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return '—';
-    try {
-      const d = new Date(dateStr);
-      return d.toLocaleDateString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateStr;
+      toastSuccess(`🎉 ${data.message}`);
+      fetchAdminData();
+    } catch (err: any) {
+      toastError(err.message || 'Erro ao simular webhook.');
+    } finally {
+      setSimulating(false);
     }
   };
 
-  const calculateDaysRemaining = (endStr: string) => {
-    try {
-      const now = Date.now();
-      const end = new Date(endStr).getTime();
-      return Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
-    } catch {
-      return 0;
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'active':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+            <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Ativa
+          </span>
+        );
+      case 'past_due':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
+            <AlertTriangle className="h-3 w-3 text-amber-600" /> Atrasada
+          </span>
+        );
+      case 'canceled':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
+            <XCircle className="h-3 w-3 text-rose-600" /> Cancelada
+          </span>
+        );
+      case 'suspended':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
+            <ShieldCheck className="h-3 w-3 text-purple-600" /> Suspensa
+          </span>
+        );
+      case 'expired':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-800 border border-gray-200">
+            <Clock className="h-3 w-3 text-gray-600" /> Expirada
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
+            <Clock className="h-3 w-3 text-blue-600" /> Pendente
+          </span>
+        );
     }
   };
 
-  const filteredTokens = tokens.filter((t) => {
-    if (tokenFilter !== 'todos' && t.status !== tokenFilter) return false;
-    if (tokenSearch) {
-      const search = tokenSearch.toLowerCase();
-      return (
-        t.token_code.toLowerCase().includes(search) ||
-        (t.activated_by_igreja && t.activated_by_igreja.toLowerCase().includes(search)) ||
-        (t.activated_by_email && t.activated_by_email.toLowerCase().includes(search)) ||
-        (t.observacoes && t.observacoes.toLowerCase().includes(search))
-      );
-    }
-    return true;
+  const filteredSubscriptions = subscriptions.filter((sub) => {
+    const matchesSearch =
+      sub.igreja_nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      sub.user_email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (sub.responsavel_nome && sub.responsavel_nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (sub.kiwify_subscription_id && sub.kiwify_subscription_id.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    const matchesStatus = statusFilter === 'all' || sub.status === statusFilter;
+    return matchesSearch && matchesStatus;
   });
 
-  const filteredChurches = churches.filter((c) => {
-    if (!churchSearch) return true;
-    const search = churchSearch.toLowerCase();
-    return (
-      c.igreja_nome.toLowerCase().includes(search) ||
-      c.email.toLowerCase().includes(search) ||
-      (c.responsavel_nome && c.responsavel_nome.toLowerCase().includes(search)) ||
-      (c.token_code && c.token_code.toLowerCase().includes(search))
-    );
-  });
+  const webhookEndpointUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/api/webhooks/kiwify`
+    : 'https://seu-dominio/api/webhooks/kiwify';
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-30 bg-slate-900/95 border-b border-slate-800 backdrop-blur-md px-4 sm:px-8 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md">
-            <ShieldCheck className="h-6 w-6 text-white" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-bold text-white tracking-tight leading-tight">
-                Painel Administrativo Mais Igreja
-              </h1>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                Super Admin
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Gestão de Licenças, Testes de 14 Dias e Tokens Criptografados
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>paulotavares78@hotmail.com</span>
-          </div>
-
-          {onSwitchToChurchApp && (
-            <button
-              onClick={onSwitchToChurchApp}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-              title="Acessar painel pastoral da igreja"
-            >
-              <Church className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Ver Sistema da Igreja</span>
-              <span className="sm:hidden">Igreja</span>
-            </button>
-          )}
-
-          <button
-            onClick={loadData}
-            disabled={loading}
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700 cursor-pointer disabled:opacity-50"
-            title="Atualizar dados"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-400' : ''}`} />
-          </button>
-
-          <Button
-            onClick={onLogoutAdmin}
-            variant="outline"
-            className="text-xs border-rose-900/60 bg-rose-950/40 text-rose-300 hover:bg-rose-900/40 hover:text-white"
-          >
-            <LogOut className="h-3.5 w-3.5 mr-1.5" />
-            <span>Sair do Admin</span>
-          </Button>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-        {/* BANNER INFORMATIVO: BANCO AUTÔNOMO */}
-        <div className="p-4 rounded-xl bg-blue-950/50 border border-blue-800/80 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-start sm:items-center gap-3">
-            <div className="h-9 w-9 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col">
+      {/* Header Administrativo */}
+      <header className="border-b border-slate-800 bg-slate-950/80 sticky top-0 z-30 px-6 py-4 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <ShieldCheck className="h-6 w-6" />
             </div>
             <div>
-              <p className="font-bold text-white text-sm">Armazenamento Autônomo e Atômico Ativo</p>
-              <p className="text-slate-300 text-xs mt-0.5 leading-relaxed">
-                A geração de tokens, validação e monitoramento de licenças funcionam 100% de forma segura e autônoma, <strong>sem necessidade de criar ou rodar SQL no Supabase</strong>.
+              <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                Painel Administrativo Mais Igreja
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                  SaaS Kiwify
+                </span>
+              </h1>
+              <p className="text-xs text-slate-400">
+                Gerenciamento central de assinaturas recorrentes, webhooks e igrejas contratantes
               </p>
             </div>
           </div>
-          <span className="px-3 py-1 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold shrink-0 self-start sm:self-center">
-            Pronto para Produção
-          </span>
-        </div>
 
-        {/* KPI CARDS */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
-          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-slate-400 font-medium">Total de Igrejas</p>
-                <p className="text-2xl font-bold text-white mt-0.5">{stats.churches.total}</p>
-                <p className="text-[11px] text-slate-400 mt-1">comunidades cadastradas</p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-blue-900/40 border border-blue-800/50 flex items-center justify-center text-blue-400">
-                <Church className="h-5 w-5" />
-              </div>
-            </CardContent>
-          </Card>
+          <div className="flex items-center gap-2.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchAdminData}
+              disabled={loading}
+              className="border-slate-700 bg-slate-800/80 text-slate-200 hover:bg-slate-700 text-xs cursor-pointer"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>Atualizar Dados</span>
+            </Button>
 
-          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-amber-400 font-medium">Testes Ativos (14d)</p>
-                <p className="text-2xl font-bold text-amber-300 mt-0.5">{stats.churches.activeTrials}</p>
-                <p className="text-[11px] text-slate-400 mt-1">período experimental</p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-amber-900/40 border border-amber-800/50 flex items-center justify-center text-amber-400">
-                <Clock className="h-5 w-5" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-rose-400 font-medium">Testes Expirados</p>
-                <p className="text-2xl font-bold text-rose-300 mt-0.5">{stats.churches.expiredTrials}</p>
-                <p className="text-[11px] text-slate-400 mt-1">aguardando ativação</p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-rose-900/40 border border-rose-800/50 flex items-center justify-center text-rose-400">
-                <AlertTriangle className="h-5 w-5" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-emerald-400 font-medium">Licenças Permanentes</p>
-                <p className="text-2xl font-bold text-emerald-300 mt-0.5">{stats.churches.activeLicenses}</p>
-                <p className="text-[11px] text-slate-400 mt-1">acesso vitalício ativo</p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-emerald-900/40 border border-emerald-800/50 flex items-center justify-center text-emerald-400">
-                <CheckCircle2 className="h-5 w-5" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-slate-900 border-slate-800 text-slate-100 shadow-sm col-span-2 lg:col-span-1">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-purple-400 font-medium">Tokens Disponíveis</p>
-                <p className="text-2xl font-bold text-purple-300 mt-0.5">{stats.tokens.available}</p>
-                <p className="text-[11px] text-slate-400 mt-1">prontos para entrega</p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-purple-900/40 border border-purple-800/50 flex items-center justify-center text-purple-400">
-                <Key className="h-5 w-5" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* GERADOR DE TOKENS */}
-        <Card className="bg-slate-900/90 border-slate-800 text-slate-100 shadow-md">
-          <CardHeader className="pb-3 border-b border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-blue-400" />
-                <CardTitle className="text-base font-bold text-white">
-                  Gerador de Tokens de Ativação Permanente
-                </CardTitle>
-              </div>
-              <span className="text-xs text-slate-400 hidden sm:inline">
-                Uso único • Hash SHA-256 no banco • Vitalício sem mensalidade
-              </span>
-            </div>
-          </CardHeader>
-          <CardContent className="p-4 sm:p-6 space-y-4">
-            <form onSubmit={handleGenerateTokens} className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-              <div className="sm:col-span-3">
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Quantidade a Gerar
-                </label>
-                <select
-                  value={tokenQty}
-                  onChange={(e) => setTokenQty(Number(e.target.value))}
-                  className="w-full h-10 px-3 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                >
-                  <option value={1}>1 Token Único</option>
-                  <option value={3}>3 Tokens</option>
-                  <option value={5}>5 Tokens</option>
-                  <option value={10}>10 Tokens (Lote)</option>
-                </select>
-              </div>
-
-              <div className="sm:col-span-6">
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Observação / Destino (Opcional)
-                </label>
-                <Input
-                  type="text"
-                  placeholder="Ex: Venda Pr. Carlos - Igreja Batista Central"
-                  value={tokenNote}
-                  onChange={(e) => setTokenNote(e.target.value)}
-                  className="bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500 h-10"
-                />
-              </div>
-
-              <div className="sm:col-span-3">
-                <button
-                  type="submit"
-                  disabled={generating}
-                  className="w-full h-10 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
-                >
-                  {generating ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="h-4 w-4" />
-                  )}
-                  <span>Gerar Token(s)</span>
-                </button>
-              </div>
-            </form>
-
-            {/* Tokens recém-gerados */}
-            {lastGenerated.length > 0 && (
-              <div className="mt-4 p-4 rounded-xl bg-blue-950/40 border border-blue-800/80 space-y-3 animate-fade-in">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold text-blue-300">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                    <span>
-                      {lastGenerated.length === 1
-                        ? 'Token Permanente Gerado com Sucesso! Copie para enviar ao cliente:'
-                        : `${lastGenerated.length} Tokens Gerados com Sucesso! Copie abaixo:`}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setLastGenerated([])}
-                    className="text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
-                  >
-                    Ocultar
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  {lastGenerated.map((t) => {
-                    const isCopied = copiedToken === t.token_code;
-                    return (
-                      <div
-                        key={t.id}
-                        className="flex items-center justify-between p-3 rounded-lg bg-slate-900 border border-blue-700/60 shadow-xs"
-                      >
-                        <div>
-                          <span className="font-mono text-sm font-bold text-white tracking-wider block">
-                            {t.token_code}
-                          </span>
-                          <span className="text-[10px] text-blue-400">
-                            Disponível para ativação permanente
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyCode(t.token_code)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                            isCopied
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs'
-                          }`}
-                        >
-                          {isCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                          <span>{isCopied ? 'Copiado!' : 'Copiar'}</span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* VALIDADOR E CONSULTA DE TOKEN */}
-        <Card className="bg-slate-900/90 border-slate-800 text-slate-100 shadow-md">
-          <CardHeader className="pb-3 border-b border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Key className="h-5 w-5 text-emerald-400" />
-                <CardTitle className="text-base font-bold text-white">
-                  Validador e Consulta Imediata de Token
-                </CardTitle>
-              </div>
-              <span className="text-xs text-slate-400 hidden sm:inline">
-                Consulte em tempo real a validade, congregação vinculada e data de ativação
-              </span>
-            </div>
-          </CardHeader>
-          <CardContent className="p-4 sm:p-6 space-y-4">
-            <form onSubmit={handleTestToken} className="flex flex-col sm:flex-row gap-3 items-end">
-              <div className="flex-1 w-full">
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Digite ou Cole o Código do Token (Ex: MI-XXXX-XXXX-XXXX-XXXX)
-                </label>
-                <Input
-                  type="text"
-                  placeholder="MI-XXXX-XXXX-XXXX-XXXX"
-                  value={testTokenCode}
-                  onChange={(e) => setTestTokenCode(e.target.value.toUpperCase())}
-                  className="bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500 font-mono tracking-wider h-10"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={testingToken}
-                className="w-full sm:w-auto h-10 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+            {onSwitchToChurchApp && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onSwitchToChurchApp}
+                className="border-blue-500/40 bg-blue-950/40 text-blue-300 hover:bg-blue-900/60 text-xs cursor-pointer"
               >
-                {testingToken ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                <span>Validar / Consultar Token</span>
-              </button>
-            </form>
-
-            {testResult && (
-              <div
-                className={`p-4 rounded-xl border text-xs space-y-1.5 ${
-                  testResult.valid
-                    ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-300'
-                    : testResult.status === 'utilizado'
-                    ? 'bg-blue-950/40 border-blue-800/80 text-blue-300'
-                    : 'bg-rose-950/40 border-rose-800/80 text-rose-300'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-bold text-sm">
-                    {testResult.valid ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                    ) : (
-                      <AlertTriangle className="h-4 w-4 text-amber-400" />
-                    )}
-                    <span>STATUS: {testResult.status?.toUpperCase() || 'RESULTADO'}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setTestResult(null)}
-                    className="text-xs text-slate-400 hover:text-white cursor-pointer"
-                  >
-                    Fechar
-                  </button>
-                </div>
-                <p className="text-white text-xs leading-relaxed">{testResult.message}</p>
-                {testResult.churchName && (
-                  <p className="text-slate-300">
-                    Igreja:{' '}
-                    <strong className="text-white">{testResult.churchName}</strong>{' '}
-                    ({testResult.churchEmail})
-                  </p>
-                )}
-                {testResult.date && (
-                  <p className="text-slate-400 text-[11px]">
-                    Data de Ativação / Registro: {formatDate(testResult.date)}
-                  </p>
-                )}
-              </div>
+                <Church className="h-3.5 w-3.5 mr-1.5 text-blue-400" />
+                <span>Visualizar como Igreja</span>
+              </Button>
             )}
-          </CardContent>
-        </Card>
 
-        {/* ABAS */}
-        <div className="flex border-b border-slate-800 gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onLogoutAdmin}
+              className="text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 text-xs cursor-pointer"
+            >
+              <LogOut className="h-3.5 w-3.5 mr-1.5" />
+              <span>Sair do Admin</span>
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Conteúdo Principal */}
+      <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
+        {/* KPI Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
+          <Card className="bg-slate-800/80 border-slate-700/60">
+            <CardContent className="p-4">
+              <span className="text-xs font-medium text-slate-400">Total Assinaturas</span>
+              <p className="text-2xl font-black text-white mt-1">{stats.total}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-emerald-950/30 border-emerald-800/40">
+            <CardContent className="p-4">
+              <span className="text-xs font-medium text-emerald-400">Assinaturas Ativas</span>
+              <p className="text-2xl font-black text-emerald-300 mt-1">{stats.active}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-amber-950/30 border-amber-800/40">
+            <CardContent className="p-4">
+              <span className="text-xs font-medium text-amber-400">Atrasadas / Pendentes</span>
+              <p className="text-2xl font-black text-amber-300 mt-1">{stats.past_due + stats.pending}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-rose-950/30 border-rose-800/40">
+            <CardContent className="p-4">
+              <span className="text-xs font-medium text-rose-400">Canceladas</span>
+              <p className="text-2xl font-black text-rose-300 mt-1">{stats.canceled}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-purple-950/30 border-purple-800/40">
+            <CardContent className="p-4">
+              <span className="text-xs font-medium text-purple-400">Suspensas</span>
+              <p className="text-2xl font-black text-purple-300 mt-1">{stats.suspended}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-blue-950/30 border-blue-800/40">
+            <CardContent className="p-4">
+              <span className="text-xs font-medium text-blue-400">Webhooks Kiwify</span>
+              <p className="text-2xl font-black text-blue-300 mt-1">{stats.totalWebhooks}</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Abas de Navegação */}
+        <div className="flex border-b border-slate-800 space-x-2">
           <button
-            onClick={() => setActiveTab('tokens')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition-all cursor-pointer ${
-              activeTab === 'tokens'
-                ? 'border-blue-500 text-blue-400'
+            type="button"
+            onClick={() => setActiveTab('subscriptions')}
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 cursor-pointer transition-all ${
+              activeTab === 'subscriptions'
+                ? 'border-blue-500 text-blue-400 bg-slate-800/50'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Key className="h-4 w-4" />
-            <span>Tokens de Ativação ({tokens.length})</span>
+            <Layers className="h-4 w-4" />
+            <span>Assinaturas das Igrejas ({subscriptions.length})</span>
           </button>
 
           <button
-            onClick={() => setActiveTab('churches')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition-all cursor-pointer ${
-              activeTab === 'churches'
-                ? 'border-blue-500 text-blue-400'
+            type="button"
+            onClick={() => setActiveTab('webhooks')}
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 cursor-pointer transition-all ${
+              activeTab === 'webhooks'
+                ? 'border-blue-500 text-blue-400 bg-slate-800/50'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Church className="h-4 w-4" />
-            <span>Igrejas & Licenças ({churches.length})</span>
+            <Webhook className="h-4 w-4" />
+            <span>Auditoria de Webhooks Kiwify ({webhookLogs.length})</span>
           </button>
 
           <button
-            onClick={() => setActiveTab('logs')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition-all cursor-pointer ${
-              activeTab === 'logs'
-                ? 'border-blue-500 text-blue-400'
+            type="button"
+            onClick={() => setActiveTab('integration')}
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 cursor-pointer transition-all ${
+              activeTab === 'integration'
+                ? 'border-blue-500 text-blue-400 bg-slate-800/50'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <History className="h-4 w-4" />
-            <span>Auditoria & Histórico ({logs.length})</span>
+            <Activity className="h-4 w-4" />
+            <span>Integração Kiwify & Simulador</span>
           </button>
         </div>
 
-        {/* ======================================================== */}
-        {/* ABA 1: TOKENS                                            */}
-        {/* ======================================================== */}
-        {activeTab === 'tokens' && (
+        {/* TAB 1: LISTA DE ASSINATURAS DAS IGREJAS */}
+        {activeTab === 'subscriptions' && (
           <div className="space-y-4">
+            {/* Filtros e Busca */}
             <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-              <div className="relative w-full sm:w-72">
-                <Search className="h-4 w-4 absolute left-3 top-3 text-slate-400" />
+              <div className="relative w-full sm:w-96">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input
                   type="text"
-                  placeholder="Buscar token ou igreja..."
-                  value={tokenSearch}
-                  onChange={(e) => setTokenSearch(e.target.value)}
-                  className="pl-9 bg-slate-900 border-slate-800 text-slate-100 text-xs h-9"
+                  placeholder="Buscar por congregação, pastor, email ou ID..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9 bg-slate-800/90 border-slate-700 text-slate-100 placeholder:text-slate-500 text-xs"
                 />
               </div>
 
-              <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1">
-                {(['todos', 'disponivel', 'utilizado', 'revogado'] as const).map((filter) => {
-                  const labels = {
-                    todos: 'Todos',
-                    disponivel: 'Disponíveis',
-                    utilizado: 'Utilizados',
-                    revogado: 'Revogados',
-                  };
-                  return (
-                    <button
-                      key={filter}
-                      onClick={() => setTokenFilter(filter)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                        tokenFilter === filter
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                      }`}
-                    >
-                      {labels[filter]}
-                    </button>
-                  );
-                })}
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <span className="text-xs text-slate-400 shrink-0">Filtrar status:</span>
+                <Select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="bg-slate-800 border-slate-700 text-slate-200 text-xs"
+                >
+                  <option value="all">Todos os Status</option>
+                  <option value="active">Ativas</option>
+                  <option value="past_due">Atrasadas</option>
+                  <option value="canceled">Canceladas</option>
+                  <option value="suspended">Suspensas</option>
+                  <option value="pending">Pendentes</option>
+                </Select>
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-sm">
+            {/* Tabela de Assinaturas */}
+            <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-800/40">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 font-semibold">
+                  <thead className="bg-slate-900/90 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
                     <tr>
-                      <th className="py-3 px-4">Código do Token</th>
+                      <th className="py-3 px-4">Igreja / Congregação</th>
+                      <th className="py-3 px-4">Pastor / Responsável</th>
+                      <th className="py-3 px-4">E-mail Kiwify</th>
                       <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4">Criado em</th>
-                      <th className="py-3 px-4">Igreja Vinculada</th>
-                      <th className="py-3 px-4">Data de Ativação</th>
-                      <th className="py-3 px-4">Observações</th>
+                      <th className="py-3 px-4">Próximo Vencimento</th>
+                      <th className="py-3 px-4">Kiwify Sub ID</th>
                       <th className="py-3 px-4 text-right">Ações</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800">
-                    {filteredTokens.length === 0 ? (
+                  <tbody className="divide-y divide-slate-800/80">
+                    {filteredSubscriptions.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="text-center py-8 text-slate-500">
-                          Nenhum token gerado ainda. Utilize o botão acima para gerar tokens.
+                        <td colSpan={7} className="py-8 text-center text-slate-500">
+                          Nenhuma assinatura encontrada com os filtros selecionados.
                         </td>
                       </tr>
                     ) : (
-                      filteredTokens.map((t) => {
-                        const isCopied = copiedToken === t.token_code;
-                        return (
-                          <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="py-3 px-4 font-mono font-bold text-white text-sm">
-                              {t.token_code}
-                            </td>
-                            <td className="py-3 px-4">
-                              {t.status === 'disponivel' && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
-                                  Disponível
-                                </span>
-                              )}
-                              {t.status === 'utilizado' && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Utilizado
-                                </span>
-                              )}
-                              {t.status === 'revogado' && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                                  <XCircle className="h-3 w-3" />
-                                  Revogado
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-slate-400">{formatDate(t.created_at)}</td>
-                            <td className="py-3 px-4">
-                              {t.activated_by_igreja ? (
-                                <div>
-                                  <span className="font-semibold text-white block">
-                                    {t.activated_by_igreja}
-                                  </span>
-                                  <span className="text-[11px] text-slate-400 block">
-                                    {t.activated_by_email}
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-slate-500 italic">Não ativado</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-slate-400">{formatDate(t.activated_at)}</td>
-                            <td className="py-3 px-4 text-slate-400 max-w-xs truncate">
-                              {t.observacoes || '—'}
-                            </td>
-                            <td className="py-3 px-4 text-right space-x-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleCopyCode(t.token_code)}
-                                className="p-1.5 rounded-md hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer inline-flex items-center gap-1 text-xs"
-                                title="Copiar Token"
-                              >
-                                {isCopied ? (
-                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
-                                ) : (
-                                  <Copy className="h-3.5 w-3.5" />
-                                )}
-                              </button>
-
-                              {t.status === 'disponivel' && (
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmRevokeToken(t)}
-                                  className="p-1.5 rounded-md hover:bg-rose-950 text-rose-400 hover:text-rose-300 cursor-pointer inline-flex items-center gap-1 text-xs"
-                                  title="Revogar Token"
-                                >
-                                  <XCircle className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ======================================================== */}
-        {/* ABA 2: IGREJAS                                           */}
-        {/* ======================================================== */}
-        {activeTab === 'churches' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="relative w-full sm:w-80">
-                <Search className="h-4 w-4 absolute left-3 top-3 text-slate-400" />
-                <Input
-                  type="text"
-                  placeholder="Buscar igreja, pastor ou email..."
-                  value={churchSearch}
-                  onChange={(e) => setChurchSearch(e.target.value)}
-                  className="pl-9 bg-slate-900 border-slate-800 text-slate-100 text-xs h-9"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 font-semibold">
-                    <tr>
-                      <th className="py-3 px-4">Comunidade / Igreja</th>
-                      <th className="py-3 px-4">Responsável & Email</th>
-                      <th className="py-3 px-4">Status da Licença</th>
-                      <th className="py-3 px-4">Início do Teste</th>
-                      <th className="py-3 px-4">Vencimento / Restante</th>
-                      <th className="py-3 px-4">Token Ativado</th>
-                      <th className="py-3 px-4 text-right">Ações de Gestão</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800">
-                    {filteredChurches.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="text-center py-8 text-slate-500">
-                          Nenhuma igreja cadastrada no sistema ainda.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredChurches.map((c) => {
-                        const daysRemaining = calculateDaysRemaining(c.trial_end);
-                        return (
-                          <tr key={c.id} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="py-3 px-4">
-                              <div className="flex items-center gap-2">
-                                <Church className="h-4 w-4 text-blue-400 shrink-0" />
-                                <span className="font-semibold text-white text-sm">
-                                  {c.igreja_nome}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="py-3 px-4">
-                              <span className="text-white block font-medium">
-                                {c.responsavel_nome || 'Pastor(a)'} ({c.cargo || 'Liderança'})
-                              </span>
-                              <span className="text-[11px] text-slate-400 block">{c.email}</span>
-                            </td>
-                            <td className="py-3 px-4">
-                              {c.status === 'active' && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Licença Vitalícia
-                                </span>
-                              )}
-                              {c.status === 'trial' && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                  <Clock className="h-3 w-3" />
-                                  Teste ({daysRemaining} dias restam)
-                                </span>
-                              )}
-                              {c.status === 'trial_expired' && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                                  <AlertTriangle className="h-3 w-3" />
-                                  Teste Expirado
-                                </span>
-                              )}
-                              {c.status === 'revoked' && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-red-950 text-red-400 border border-red-800">
-                                  <XCircle className="h-3 w-3" />
-                                  Acesso Revogado
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-slate-400">{formatDate(c.trial_start)}</td>
-                            <td className="py-3 px-4">
-                              {c.status === 'active' ? (
-                                <span className="text-emerald-400 font-medium">Ilimitado / Vitalício</span>
-                              ) : (
-                                <div>
-                                  <span className="text-slate-300 block">{formatDate(c.trial_end)}</span>
-                                  {c.status === 'trial' && (
-                                    <span className="text-[10px] text-amber-400">
-                                      {daysRemaining === 0 ? 'Expira hoje!' : `${daysRemaining} dia(s) restantes`}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 font-mono text-slate-300">
-                              {c.token_code ? (
-                                <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs">
-                                  {c.token_code}
-                                </span>
-                              ) : (
-                                <span className="text-slate-500 italic">Nenhum</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-right space-x-1.5">
-                              {c.status !== 'active' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleActivateChurch(c.id)}
-                                  className="px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition-colors cursor-pointer"
-                                  title="Conceder Licença Permanente sem Token"
-                                >
-                                  Ativar Permanente
-                                </button>
-                              )}
-
-                              {c.status !== 'revoked' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmRevokeChurch(c)}
-                                  className="px-2.5 py-1 rounded bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 text-xs font-semibold transition-colors cursor-pointer"
-                                  title="Revogar Acesso"
-                                >
-                                  Revogar
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleActivateChurch(c.id)}
-                                  className="px-2.5 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 text-xs font-semibold transition-colors cursor-pointer"
-                                  title="Reativar Acesso"
-                                >
-                                  Reativar
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ======================================================== */}
-        {/* ABA 3: AUDITORIA                                         */}
-        {/* ======================================================== */}
-        {activeTab === 'logs' && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 font-semibold">
-                    <tr>
-                      <th className="py-3 px-4">Data & Hora</th>
-                      <th className="py-3 px-4">Operação</th>
-                      <th className="py-3 px-4">Descrição da Atividade</th>
-                      <th className="py-3 px-4">Igreja / E-mail</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800">
-                    {logs.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="text-center py-8 text-slate-500">
-                          Nenhum registro de atividade ainda.
-                        </td>
-                      </tr>
-                    ) : (
-                      logs.map((log) => (
-                        <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="py-3 px-4 text-slate-400 font-mono text-[11px] whitespace-nowrap">
-                            {formatDate(log.created_at)}
+                      filteredSubscriptions.map((sub) => (
+                        <tr key={sub.id} className="hover:bg-slate-800/80 transition-colors">
+                          <td className="py-3 px-4 font-semibold text-white">
+                            <div className="flex items-center gap-2">
+                              <Church className="h-4 w-4 text-blue-400 shrink-0" />
+                              <span>{sub.igreja_nome}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-slate-300">
+                            <div>{sub.responsavel_nome || 'Pastor Titular'}</div>
+                            <div className="text-[10px] text-slate-500">{sub.cargo || 'Liderança'}</div>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-slate-400">
+                            {sub.user_email}
                           </td>
                           <td className="py-3 px-4">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700">
-                              {log.tipo.replace('_', ' ')}
-                            </span>
+                            {getStatusBadge(sub.status)}
                           </td>
-                          <td className="py-3 px-4 text-white font-medium">{log.descricao}</td>
-                          <td className="py-3 px-4 text-slate-400">
-                            {log.igreja_nome ? (
-                              <span className="text-blue-300">{log.igreja_nome}</span>
-                            ) : log.user_email ? (
-                              log.user_email
+                          <td className="py-3 px-4 text-slate-300 font-mono">
+                            {sub.next_due_date ? new Date(sub.next_due_date).toLocaleDateString('pt-BR') : '—'}
+                          </td>
+                          <td className="py-3 px-4 text-slate-400 font-mono text-[11px]">
+                            {sub.kiwify_subscription_id ? (
+                              <span title={sub.kiwify_subscription_id}>
+                                {sub.kiwify_subscription_id.slice(0, 10)}...
+                              </span>
                             ) : (
-                              '—'
+                              <span className="text-slate-600">—</span>
                             )}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedSub(sub);
+                                  setHistoryModalOpen(true);
+                                }}
+                                className="h-7 px-2 text-[11px] text-blue-400 hover:text-white hover:bg-blue-900/40 cursor-pointer"
+                                title="Ver histórico de eventos da Kiwify"
+                              >
+                                <History className="h-3 w-3 mr-1" />
+                                <span>Eventos</span>
+                              </Button>
+
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setTargetSub(sub);
+                                  setNewStatusChoice(sub.status as any);
+                                  setStatusModalOpen(true);
+                                }}
+                                className="h-7 px-2 text-[11px] border-slate-700 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                                title="Ajustar status manualmente"
+                              >
+                                <Sliders className="h-3 w-3 mr-1 text-amber-400" />
+                                <span>Ajustar</span>
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1240,85 +620,362 @@ export function AdminPanel({ adminToken, onLogoutAdmin, onSwitchToChurchApp }: A
             </div>
           </div>
         )}
+
+        {/* TAB 2: AUDITORIA DE WEBHOOKS KIWIFY */}
+        {activeTab === 'webhooks' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-white">Histórico de Webhooks Recebidos da Kiwify</h3>
+                <p className="text-xs text-slate-400">
+                  Registros em tempo real das notificações enviadas pela Kiwify sobre compras, renovações e cancelamentos
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchAdminData}
+                className="border-slate-700 text-xs cursor-pointer"
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-1" /> Atualizar Logs
+              </Button>
+            </div>
+
+            <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-800/40">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-900 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 px-4">Data / Hora</th>
+                    <th className="py-3 px-4">Evento Kiwify</th>
+                    <th className="py-3 px-4">Cliente / E-mail</th>
+                    <th className="py-3 px-4">Order ID</th>
+                    <th className="py-3 px-4">Resultado</th>
+                    <th className="py-3 px-4">Mensagem de Processamento</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80">
+                  {webhookLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-500">
+                        Nenhum evento de webhook recebido ainda. Utilize a aba "Integração" para simular ou configure o webhook na Kiwify.
+                      </td>
+                    </tr>
+                  ) : (
+                    webhookLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-slate-800/60 transition-colors">
+                        <td className="py-3 px-4 text-slate-400 whitespace-nowrap">
+                          {new Date(log.created_at).toLocaleString('pt-BR')}
+                        </td>
+                        <td className="py-3 px-4 font-mono font-bold text-blue-400">
+                          {log.event_type}
+                        </td>
+                        <td className="py-3 px-4 text-slate-300 font-mono">
+                          {log.customer_email || '—'}
+                        </td>
+                        <td className="py-3 px-4 text-slate-400 font-mono text-[11px]">
+                          {log.order_id ? log.order_id.slice(0, 12) : '—'}
+                        </td>
+                        <td className="py-3 px-4">
+                          {log.status === 'processed' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800/60">
+                              <CheckCircle2 className="h-3 w-3" /> Processado
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800/60">
+                              <XCircle className="h-3 w-3" /> {log.status}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-slate-300">
+                          {log.message}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: INTEGRAÇÃO KIWIFY & SIMULADOR */}
+        {activeTab === 'integration' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Painel de Configurações */}
+            <Card className="bg-slate-800/60 border-slate-700">
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-white flex items-center gap-2">
+                  <Webhook className="h-4 w-4 text-blue-400" />
+                  URL do Webhook Oficial para Configurar na Kiwify
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-xs">
+                <div className="space-y-1.5">
+                  <label className="text-slate-400 font-medium">URL de Notificação (Webhook Endpoint):</label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      readOnly
+                      value={webhookEndpointUrl}
+                      className="bg-slate-900 border-slate-700 text-slate-200 font-mono text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => copyToClipboard(webhookEndpointUrl, 'URL do Webhook')}
+                      className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shrink-0"
+                    >
+                      {copiedText === 'URL do Webhook' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Copie esta URL e cole na configuração de Webhooks do produto na plataforma Kiwify.
+                  </p>
+                </div>
+
+                <div className="p-3.5 bg-slate-900/80 rounded-xl border border-slate-700/60 space-y-2">
+                  <h4 className="font-bold text-white text-xs">Variáveis de Ambiente no .env:</h4>
+                  <div className="space-y-1 font-mono text-[11px]">
+                    <div className="flex justify-between py-1 border-b border-slate-800">
+                      <span className="text-slate-400">KIWIFY_CHECKOUT_URL</span>
+                      <span className="text-emerald-400 truncate max-w-xs">{config.checkoutUrl || 'Não configurada'}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-slate-800">
+                      <span className="text-slate-400">KIWIFY_PRODUCT_ID</span>
+                      <span className="text-blue-400">{config.productId || 'Não configurado'}</span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-slate-400">KIWIFY_WEBHOOK_SECRET</span>
+                      <span className="text-purple-400">{config.hasWebhookSecret ? 'Protegido / Configurado' : 'Opcional (Livre)'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Formulário de Configuração Dinâmica */}
+                <form onSubmit={handleSaveKiwifyConfig} className="p-3.5 bg-slate-900/80 rounded-xl border border-slate-700/60 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white text-xs">Vincular Produto & Checkout da Kiwify:</span>
+                    <span className="text-[10px] text-amber-400 font-semibold">Preencha quando criar o produto</span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-slate-400 text-[11px]">Link do Checkout Kiwify (URL):</label>
+                    <Input
+                      type="url"
+                      placeholder="https://pay.kiwify.com.br/SEU_LINK"
+                      value={formCheckoutUrl}
+                      onChange={(e) => setFormCheckoutUrl(e.target.value)}
+                      className="bg-slate-950 border-slate-700 text-slate-100 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-slate-400 text-[11px]">ID do Produto Kiwify:</label>
+                      <Input
+                        type="text"
+                        placeholder="Ex: prod_12345"
+                        value={formProductId}
+                        onChange={(e) => setFormProductId(e.target.value)}
+                        className="bg-slate-950 border-slate-700 text-slate-100 text-xs font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-slate-400 text-[11px]">Segredo do Webhook (Token):</label>
+                      <Input
+                        type="password"
+                        placeholder="Opcional"
+                        value={formWebhookSecret}
+                        onChange={(e) => setFormWebhookSecret(e.target.value)}
+                        className="bg-slate-950 border-slate-700 text-slate-100 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <Button
+                    type="submit"
+                    disabled={savingConfig}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg cursor-pointer text-xs mt-1"
+                  >
+                    <span>{savingConfig ? 'Salvando...' : 'Salvar Dados da Kiwify'}</span>
+                  </Button>
+                </form>
+
+                <div className="p-3 bg-blue-950/40 border border-blue-800/40 rounded-xl text-blue-300 text-xs leading-relaxed">
+                  <strong>💡 Como funciona:</strong> Você pode deixar em branco agora e preencher assim que criar seu produto na Kiwify. Quando um pastor assinar, a Kiwify enviará uma notificação para a URL acima e o sistema liberará o acesso automaticamente.
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Simulador de Webhook */}
+            <Card className="bg-slate-800/60 border-slate-700">
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-white flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-emerald-400" />
+                  Simulador de Eventos de Webhook Kiwify
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleSimulateWebhook} className="space-y-3.5 text-xs">
+                  <p className="text-slate-400 leading-relaxed">
+                    Teste o fluxo completo de aprovação, renovação, atraso ou cancelamento simulando o disparo da Kiwify para qualquer congregação:
+                  </p>
+
+                  <div className="space-y-1">
+                    <label className="text-slate-300 font-semibold">Tipo de Evento Kiwify:</label>
+                    <Select
+                      value={simEvent}
+                      onChange={(e) => setSimEvent(e.target.value as any)}
+                      className="bg-slate-900 border-slate-700 text-slate-100"
+                    >
+                      <option value="order_approved">order_approved — Pagamento Aprovado (Libera Acesso)</option>
+                      <option value="subscription_renewed">subscription_renewed — Renovação Mensal Paga</option>
+                      <option value="subscription_late">subscription_late — Pagamento Atrasado (Bloqueia Acesso)</option>
+                      <option value="subscription_canceled">subscription_canceled — Assinatura Cancelada</option>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-slate-300 font-semibold">E-mail do Cliente / Igreja:</label>
+                    <Input
+                      type="email"
+                      placeholder="pastor@igreja.com"
+                      value={simEmail}
+                      onChange={(e) => setSimEmail(e.target.value)}
+                      className="bg-slate-900 border-slate-700 text-slate-100"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-slate-300 font-semibold">Nome da Congregação (Opcional):</label>
+                    <Input
+                      type="text"
+                      placeholder="Igreja Batista Exemplo"
+                      value={simChurchName}
+                      onChange={(e) => setSimChurchName(e.target.value)}
+                      className="bg-slate-900 border-slate-700 text-slate-100"
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    disabled={simulating}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl cursor-pointer mt-2"
+                  >
+                    <Send className={`h-4 w-4 mr-2 ${simulating ? 'animate-bounce' : ''}`} />
+                    <span>{simulating ? 'Disparando simulação...' : 'Executar Simulação de Webhook'}</span>
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </main>
 
-      {/* MODAL REVOGAR IGREJA */}
-      {confirmRevokeChurch && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-rose-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="h-10 w-10 rounded-full bg-rose-950 flex items-center justify-center border border-rose-800">
-                <AlertTriangle className="h-6 w-6 text-rose-400" />
-              </div>
-              <div>
-                <h3 className="font-bold text-white text-base">Confirmar Revogação</h3>
-                <p className="text-xs text-rose-300">Operação administrativa sensível</p>
-              </div>
+      {/* MODAL: HISTÓRICO DE EVENTOS KIWIFY */}
+      {selectedSub && (
+        <Dialog open={historyModalOpen} onOpenChange={setHistoryModalOpen}>
+          <div className="p-6 max-w-xl w-full text-slate-100">
+            <DialogHeader className="mb-4">
+              <DialogTitle className="text-base font-bold text-white flex items-center gap-2">
+                <History className="h-5 w-5 text-blue-400" />
+                Histórico Kiwify: {selectedSub.igreja_nome}
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-400">
+                Auditoria de pagamentos e alterações de status registradas
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+              {(!selectedSub.events_history || selectedSub.events_history.length === 0) ? (
+                <p className="text-xs text-slate-400 py-4 text-center">Nenhum evento registrado ainda.</p>
+              ) : (
+                selectedSub.events_history.map((ev) => (
+                  <div key={ev.id} className="p-3 bg-slate-800/80 rounded-xl border border-slate-700/60 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-blue-400 font-mono">{ev.event_type}</span>
+                      <span className="text-[11px] text-slate-400">{new Date(ev.created_at).toLocaleString('pt-BR')}</span>
+                    </div>
+                    <p className="text-slate-200">{ev.description}</p>
+                    {ev.kiwify_order_id && (
+                      <p className="text-[10px] text-slate-400 font-mono">Order ID: {ev.kiwify_order_id}</p>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Tem certeza que deseja revogar o acesso da igreja{' '}
-              <strong className="text-white">"{confirmRevokeChurch.igreja_nome}"</strong> (
-              {confirmRevokeChurch.email})?
-            </p>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="pt-4 mt-4 border-t border-slate-800 flex justify-end">
               <Button
                 variant="outline"
-                onClick={() => setConfirmRevokeChurch(null)}
-                className="text-xs border-slate-700 text-slate-300"
+                size="sm"
+                onClick={() => setHistoryModalOpen(false)}
+                className="border-slate-700 text-xs"
               >
-                Cancelar
+                Fechar
               </Button>
-              <button
-                type="button"
-                onClick={() => handleRevokeChurch(confirmRevokeChurch.id)}
-                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition-colors cursor-pointer shadow-md"
-              >
-                Sim, Revogar Acesso
-              </button>
             </div>
           </div>
-        </div>
+        </Dialog>
       )}
 
-      {/* MODAL REVOGAR TOKEN */}
-      {confirmRevokeToken && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-rose-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="h-10 w-10 rounded-full bg-rose-950 flex items-center justify-center border border-rose-800">
-                <XCircle className="h-6 w-6 text-rose-400" />
-              </div>
-              <div>
-                <h3 className="font-bold text-white text-base">Revogar Token</h3>
-                <p className="text-xs text-rose-300">Invalidar código de ativação</p>
-              </div>
+      {/* MODAL: AJUSTE MANUAL DE STATUS */}
+      {targetSub && (
+        <Dialog open={statusModalOpen} onOpenChange={setStatusModalOpen}>
+          <form onSubmit={handleUpdateStatus} className="p-6 max-w-md w-full text-slate-100 space-y-4">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold text-white flex items-center gap-2">
+                <Sliders className="h-5 w-5 text-amber-400" />
+                Ajustar Status de Acesso
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-400">
+                {targetSub.igreja_nome} ({targetSub.user_email})
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2 text-xs">
+              <label className="text-slate-300 font-semibold">Novo Status:</label>
+              <Select
+                value={newStatusChoice}
+                onChange={(e) => setNewStatusChoice(e.target.value as any)}
+                className="bg-slate-900 border-slate-700 text-slate-100"
+              >
+                <option value="active">active — Ativa (Acesso Liberado)</option>
+                <option value="past_due">past_due — Pagamento Pendente / Atrasado</option>
+                <option value="canceled">canceled — Assinatura Cancelada</option>
+                <option value="suspended">suspended — Acesso Suspenso Administrativamente</option>
+              </Select>
             </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Deseja invalidar permanentemente o token{' '}
-              <strong className="text-white font-mono">{confirmRevokeToken.token_code}</strong>?
-            </p>
+            <div className="space-y-2 text-xs">
+              <label className="text-slate-300 font-semibold">Motivo do Ajuste:</label>
+              <Input
+                type="text"
+                placeholder="Ex: Regularização manual solicitada pelo pastor"
+                value={statusMotivo}
+                onChange={(e) => setStatusMotivo(e.target.value)}
+                className="bg-slate-900 border-slate-700 text-slate-100"
+              />
+            </div>
 
-            <div className="flex items-center justify-end gap-2 ptr-2">
+            <div className="pt-2 flex gap-2 justify-end">
               <Button
-                variant="outline"
-                onClick={() => setConfirmRevokeToken(null)}
-                className="text-xs border-slate-700 text-slate-300"
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setStatusModalOpen(false)}
+                className="text-slate-400 hover:text-white text-xs"
               >
                 Cancelar
               </Button>
-              <button
-                type="button"
-                onClick={() => handleRevokeToken(confirmRevokeToken.id)}
-                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition-colors cursor-pointer shadow-md"
+              <Button
+                type="submit"
+                size="sm"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs"
               >
-                Revogar Token
-              </button>
+                Salvar Alteração
+              </Button>
             </div>
-          </div>
-        </div>
+          </form>
+        </Dialog>
       )}
     </div>
   );

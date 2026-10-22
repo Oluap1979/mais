@@ -92,6 +92,74 @@
   ],
   "logs": [
     {
+      "id": "3d15936e-788a-4d47-9054-044711c82611",
+      "tipo": "config_kiwify_atualizada",
+      "descricao": "Configurações de integração com Kiwify atualizadas no painel administrativo.",
+      "created_at": "2026-10-22T16:07:26.182Z"
+    },
+    {
+      "id": "311ab9c4-9c84-4770-b3e3-383d13dd577d",
+      "tipo": "config_kiwify_atualizada",
+      "descricao": "Configurações de integração com Kiwify atualizadas no painel administrativo.",
+      "created_at": "2026-10-22T16:07:14.429Z"
+    },
+    {
+      "id": "e5106053-a853-49eb-aa32-e9f518abe1e9",
+      "tipo": "kiwify_subscription_renewed",
+      "descricao": "Webhook Kiwify recebido: Assinatura mensal renovada com sucesso na Kiwify. (pr.lucas@videira.com)",
+      "user_email": "pr.lucas@videira.com",
+      "igreja_nome": "Igreja Videira",
+      "created_at": "2026-10-22T15:48:56.976Z"
+    },
+    {
+      "id": "5bc03ce7-a0ae-4045-9be8-e2f0cdaf5681",
+      "tipo": "kiwify_subscription_late",
+      "descricao": "Webhook Kiwify recebido: Pagamento de renovação pendente ou recusado na Kiwify. (pr.lucas@videira.com)",
+      "user_email": "pr.lucas@videira.com",
+      "igreja_nome": "Igreja Videira",
+      "created_at": "2026-10-22T15:48:50.608Z"
+    },
+    {
+      "id": "b5864304-909c-4338-a83d-c7e588e045f0",
+      "tipo": "kiwify_order_approved",
+      "descricao": "Webhook Kiwify recebido: Pagamento aprovado na Kiwify. Acesso liberado. (pr.lucas@videira.com)",
+      "user_email": "pr.lucas@videira.com",
+      "igreja_nome": "Igreja Videira",
+      "created_at": "2026-10-22T15:48:43.766Z"
+    },
+    {
+      "id": "62612029-1ef6-4b48-beb8-f7557a82e91a",
+      "tipo": "cadastro_igreja",
+      "descricao": "Nova congregação \"Igreja Videira\" cadastrada pelo pastor Pr. Lucas Oliveira (pr.lucas@videira.com).",
+      "user_email": "pr.lucas@videira.com",
+      "igreja_nome": "Igreja Videira",
+      "created_at": "2026-10-22T15:48:37.364Z"
+    },
+    {
+      "id": "278fa4e0-dc9e-4a23-aa28-e711064ad997",
+      "tipo": "migracao_assinatura",
+      "descricao": "Igreja \"Igreja Betel\" (pastor.antonio@igreja.com) migrada com sucesso para o sistema de assinaturas.",
+      "user_email": "pastor.antonio@igreja.com",
+      "igreja_nome": "Igreja Betel",
+      "created_at": "2026-10-22T15:48:20.268Z"
+    },
+    {
+      "id": "03b229f1-ee61-4605-809d-6cad61961daf",
+      "tipo": "migracao_assinatura",
+      "descricao": "Igreja \"Igreja da Graca\" (pastorteste@igreja.com) migrada com sucesso para o sistema de assinaturas.",
+      "user_email": "pastorteste@igreja.com",
+      "igreja_nome": "Igreja da Graca",
+      "created_at": "2026-10-22T15:48:20.268Z"
+    },
+    {
+      "id": "02fd010c-a293-4da7-9fcc-55980be20ad0",
+      "tipo": "migracao_assinatura",
+      "descricao": "Igreja \"IGREJA AMANHECER\" (josieliotavares17@gmail.com) migrada com sucesso para o sistema de assinaturas.",
+      "user_email": "josieliotavares17@gmail.com",
+      "igreja_nome": "IGREJA AMANHECER",
+      "created_at": "2026-10-22T15:48:20.267Z"
+    },
+    {
       "id": "93abc143-c862-4189-83c5-3c4d76fe0a3b",
       "tipo": "ativacao_token",
       "descricao": "Licença permanente ativada com sucesso para \"Igreja Betel\" (pastor.antonio@igreja.com) com o token MI-14C5-A14E-FFB8-7260.",
@@ -180,6 +248,218 @@
       "igreja": "Igreja Betel",
       "token_code": "MI-14C5-A14E-FFB8-7260",
       "created_at": "2026-10-20T18:28:11.780Z"
+    },
+    {
+      "id": "98f595f0-191b-40a0-bae2-cbffb660a682",
+      "email": "pr.lucas@videira.com",
+      "password": "Password123!",
+      "nome": "Pr. Lucas Oliveira",
+      "cargo": "Pastor Titular",
+      "igreja": "Igreja Videira",
+      "created_at": "2026-10-22T15:48:37.364Z"
     }
-  ]
+  ],
+  "subscriptions": [
+    {
+      "id": "c7a44761-cf56-412e-b31e-b62c569c17d6",
+      "igreja_id": "31761a1b-7ef4-416b-bdd8-84ff00db7448",
+      "igreja_nome": "IGREJA AMANHECER",
+      "user_email": "josieliotavares17@gmail.com",
+      "responsavel_nome": "Pastor Titular",
+      "cargo": "Pastor Titular",
+      "status": "active",
+      "start_date": "2026-10-20T18:15:30.621Z",
+      "last_payment_date": "2026-10-20T18:15:30.621Z",
+      "next_due_date": "2026-11-21T15:48:20.267Z",
+      "events_history": [
+        {
+          "id": "27c2736c-bef0-4374-92ab-9e175376bfed",
+          "event_type": "migracao_sistema",
+          "description": "Migração automática de congregação para o novo modelo SaaS Kiwify com acesso liberado.",
+          "created_at": "2026-10-22T15:48:20.267Z"
+        }
+      ],
+      "created_at": "2026-10-20T18:15:30.621Z",
+      "updated_at": "2026-10-22T15:48:20.267Z"
+    },
+    {
+      "id": "f2b9d004-a891-4898-9d0c-1310a771960e",
+      "igreja_id": "d3c1dd80-24e6-416b-88af-fedf57eb9454",
+      "igreja_nome": "Igreja da Graca",
+      "user_email": "pastorteste@igreja.com",
+      "responsavel_nome": "Pastor Titular",
+      "cargo": "Pastor Titular",
+      "status": "active",
+      "start_date": "2026-10-20T18:20:00.702Z",
+      "last_payment_date": "2026-10-20T18:20:00.702Z",
+      "next_due_date": "2026-11-21T15:48:20.268Z",
+      "events_history": [
+        {
+          "id": "77dcfccd-dc8b-42d4-a159-34177d7e9570",
+          "event_type": "migracao_sistema",
+          "description": "Migração automática de congregação para o novo modelo SaaS Kiwify com acesso liberado.",
+          "created_at": "2026-10-22T15:48:20.268Z"
+        }
+      ],
+      "created_at": "2026-10-20T18:20:00.702Z",
+      "updated_at": "2026-10-22T15:48:20.268Z"
+    },
+    {
+      "id": "69efcbd6-15b3-454e-9419-67af96144254",
+      "igreja_id": "7c366102-1dd3-46b4-9f88-2b340197652e",
+      "igreja_nome": "Igreja Betel",
+      "user_email": "pastor.antonio@igreja.com",
+      "responsavel_nome": "Pr. Antonio",
+      "cargo": "Pastor Titular",
+      "status": "active",
+      "start_date": "2026-10-20T18:28:11.780Z",
+      "last_payment_date": "2026-10-20T18:28:11.780Z",
+      "next_due_date": "2026-11-21T15:48:20.268Z",
+      "events_history": [
+        {
+          "id": "24d35838-a7ea-4aa5-9915-6669abe26173",
+          "event_type": "migracao_sistema",
+          "description": "Migração automática de congregação para o novo modelo SaaS Kiwify com acesso liberado.",
+          "created_at": "2026-10-22T15:48:20.268Z"
+        }
+      ],
+      "created_at": "2026-10-20T18:28:11.780Z",
+      "updated_at": "2026-10-22T15:48:20.268Z"
+    },
+    {
+      "id": "3911852b-cda5-4a58-ba09-be8095a9b7b8",
+      "igreja_id": "87957dd5-b60c-4054-8a5f-2dd5d7400317",
+      "igreja_nome": "Mais Igreja",
+      "user_id": "87957dd5-b60c-4054-8a5f-2dd5d7400317",
+      "user_email": "pastor@maisigreja.com.br",
+      "responsavel_nome": "Pastor Titular",
+      "cargo": "Pastor Titular",
+      "status": "active",
+      "start_date": "2026-10-22T15:48:20.268Z",
+      "last_payment_date": "2026-10-22T15:48:20.268Z",
+      "next_due_date": "2026-11-21T15:48:20.268Z",
+      "events_history": [
+        {
+          "id": "b6d5f697-e3a4-404b-b45d-a3909052c280",
+          "event_type": "inicializacao",
+          "description": "Assinatura inicial configurada com acesso liberado.",
+          "created_at": "2026-10-22T15:48:20.268Z"
+        }
+      ],
+      "created_at": "2026-10-22T15:48:20.268Z",
+      "updated_at": "2026-10-22T15:48:20.268Z"
+    },
+    {
+      "id": "d90f8669-5da9-489a-8d3c-c7be6c081a31",
+      "igreja_id": "98f595f0-191b-40a0-bae2-cbffb660a682",
+      "igreja_nome": "Igreja Videira",
+      "user_id": "98f595f0-191b-40a0-bae2-cbffb660a682",
+      "user_email": "pr.lucas@videira.com",
+      "responsavel_nome": "Pr. Lucas Oliveira",
+      "cargo": "Pastor Titular",
+      "status": "active",
+      "start_date": "2026-10-22T15:48:37.364Z",
+      "events_history": [
+        {
+          "id": "2e15cd41-9927-46fa-9898-11ef84f49978",
+          "event_type": "subscription_renewed",
+          "description": "Assinatura mensal renovada com sucesso na Kiwify.",
+          "kiwify_order_id": "kw_ord_102032",
+          "kiwify_subscription_id": "kw_sub_998877",
+          "data": {
+            "eventType": "subscription_renewed",
+            "orderId": "kw_ord_102032",
+            "kiwifySubId": "kw_sub_998877",
+            "productId": "",
+            "status": "active"
+          },
+          "created_at": "2026-10-22T15:48:56.976Z"
+        },
+        {
+          "id": "fd05b146-dae1-4227-9f98-6defe9495d14",
+          "event_type": "subscription_late",
+          "description": "Pagamento de renovação pendente ou recusado na Kiwify.",
+          "kiwify_order_id": "kw_ord_102031",
+          "kiwify_subscription_id": "kw_sub_998877",
+          "data": {
+            "eventType": "subscription_late",
+            "orderId": "kw_ord_102031",
+            "kiwifySubId": "kw_sub_998877",
+            "productId": "",
+            "status": "past_due"
+          },
+          "created_at": "2026-10-22T15:48:50.608Z"
+        },
+        {
+          "id": "6362fde3-d551-4c24-9e6f-221bc9607080",
+          "event_type": "order_approved",
+          "description": "Pagamento aprovado na Kiwify. Acesso liberado.",
+          "kiwify_order_id": "kw_ord_102030",
+          "kiwify_subscription_id": "kw_sub_998877",
+          "data": {
+            "eventType": "order_approved",
+            "orderId": "kw_ord_102030",
+            "kiwifySubId": "kw_sub_998877",
+            "productId": "prod_mais_igreja",
+            "status": "active"
+          },
+          "created_at": "2026-10-22T15:48:43.766Z"
+        },
+        {
+          "id": "ab02010b-04df-48fd-8937-67e64c804e35",
+          "event_type": "cadastro_igreja",
+          "description": "Igreja \"Igreja Videira\" cadastrada. Aguardando assinatura Kiwify.",
+          "created_at": "2026-10-22T15:48:37.364Z"
+        }
+      ],
+      "created_at": "2026-10-22T15:48:37.364Z",
+      "updated_at": "2026-10-22T15:48:56.976Z",
+      "last_webhook_at": "2026-10-22T15:48:56.976Z",
+      "kiwify_subscription_id": "kw_sub_998877",
+      "kiwify_order_id": "kw_ord_102032",
+      "kiwify_product_id": "prod_mais_igreja",
+      "last_payment_date": "2026-10-22T15:48:56.976Z",
+      "next_due_date": "2026-11-21T15:48:56.976Z"
+    }
+  ],
+  "webhook_logs": [
+    {
+      "id": "43f976c6-5fc5-434a-be16-2a85ac5a5e32",
+      "event_type": "subscription_renewed",
+      "order_id": "kw_ord_102032",
+      "subscription_id": "kw_sub_998877",
+      "customer_email": "pr.lucas@videira.com",
+      "status": "processed",
+      "message": "Assinatura mensal renovada com sucesso na Kiwify. Igreja: \"Igreja Videira\". Status atual: active.",
+      "raw_payload_summary": "{\"event\":\"subscription_renewed\",\"order_id\":\"kw_ord_102032\",\"customer\":\"pr.lucas@videira.com\",\"status\":\"active\"}",
+      "created_at": "2026-10-22T15:48:56.976Z"
+    },
+    {
+      "id": "e6ccc752-a521-4743-bcc4-70ba274bd937",
+      "event_type": "subscription_late",
+      "order_id": "kw_ord_102031",
+      "subscription_id": "kw_sub_998877",
+      "customer_email": "pr.lucas@videira.com",
+      "status": "processed",
+      "message": "Pagamento de renovação pendente ou recusado na Kiwify. Igreja: \"Igreja Videira\". Status atual: past_due.",
+      "raw_payload_summary": "{\"event\":\"subscription_late\",\"order_id\":\"kw_ord_102031\",\"customer\":\"pr.lucas@videira.com\",\"status\":\"past_due\"}",
+      "created_at": "2026-10-22T15:48:50.608Z"
+    },
+    {
+      "id": "af17c9e4-a256-458d-952e-04e6ce18debe",
+      "event_type": "order_approved",
+      "order_id": "kw_ord_102030",
+      "subscription_id": "kw_sub_998877",
+      "customer_email": "pr.lucas@videira.com",
+      "status": "processed",
+      "message": "Pagamento aprovado na Kiwify. Acesso liberado. Igreja: \"Igreja Videira\". Status atual: active.",
+      "raw_payload_summary": "{\"event\":\"order_approved\",\"order_id\":\"kw_ord_102030\",\"customer\":\"pr.lucas@videira.com\",\"status\":\"active\"}",
+      "created_at": "2026-10-22T15:48:43.766Z"
+    }
+  ],
+  "kiwify_config": {
+    "checkout_url": "",
+    "product_id": "",
+    "webhook_secret": ""
+  }
 }

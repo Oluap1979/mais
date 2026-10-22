@@ -18,49 +18,72 @@ const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'paulotavares78@hotmail.com').to
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Admin@MaisIgreja2026';
 const JWT_SECRET = process.env.JWT_SECRET || 'mais-igreja-secret-jwt-key-2026-xyz';
 
+// Configurações dinâmicas da Kiwify (carrega do store ou fallback de variáveis de ambiente)
+function getEffectiveKiwifyConfig(storeInput?: any) {
+  const store = storeInput || ensureDataStore();
+  const checkoutUrl = (store.kiwify_config?.checkout_url || process.env.KIWIFY_CHECKOUT_URL || '').trim();
+  const productId = (store.kiwify_config?.product_id || process.env.KIWIFY_PRODUCT_ID || '').trim();
+  const webhookSecret = (store.kiwify_config?.webhook_secret || process.env.KIWIFY_WEBHOOK_SECRET || '').trim();
+  return { checkoutUrl, productId, webhookSecret };
+}
+
 // Supabase fallback no servidor
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://cxnpkpviadmfaihmtlav.supabase.co';
 const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4bnBrcHZpYWRtZmFpaG10bGF2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzOTk1MzcsImV4cCI6MjEwNjk3NTUzN30.zuEQfdNDbC78SQA_rqCedRsFDRCtXHQr_ab_1z8YL6U';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Estruturas de Dados
-export interface TokenRecord {
+// ----------------------------------------------------------------------
+// TIPOS DO NOVO MODELO DE ASSINATURA SAAS (KIWIFY)
+// ----------------------------------------------------------------------
+export type SubscriptionStatus =
+  | 'pending'    // Pagamento ou assinatura ainda não confirmados
+  | 'active'     // Assinatura válida e acesso liberado
+  | 'past_due'   // Pagamento vencido ou pendente de regularização
+  | 'canceled'   // Assinatura cancelada
+  | 'expired'    // Assinatura expirada
+  | 'suspended'; // Acesso suspenso por decisão administrativa
+
+export interface SubscriptionAuditEvent {
   id: string;
-  token_code: string;
-  token_hash: string;
-  status: 'disponivel' | 'utilizado' | 'revogado';
+  event_type: string;
+  description: string;
+  kiwify_order_id?: string;
+  kiwify_subscription_id?: string;
+  data?: any;
   created_at: string;
-  created_by: string;
-  activated_at?: string;
-  activated_by_user_id?: string;
-  activated_by_igreja?: string;
-  activated_by_email?: string;
-  observacoes?: string;
 }
 
-export interface ChurchLicenseRecord {
+export interface ChurchSubscriptionRecord {
   id: string;
-  user_id?: string;
+  igreja_id: string;
   igreja_nome: string;
-  email: string;
+  user_id?: string;
+  user_email: string;
   responsavel_nome?: string;
   cargo?: string;
-  status: 'trial' | 'trial_expired' | 'active' | 'revoked';
-  trial_start: string; // ISO String
-  trial_end: string;   // ISO String (14 dias após início)
-  activated_at?: string;
-  token_code?: string;
-  token_hash?: string;
+  kiwify_product_id?: string;
+  kiwify_subscription_id?: string;
+  kiwify_order_id?: string;
+  status: SubscriptionStatus;
+  start_date: string;
+  last_payment_date?: string;
+  next_due_date?: string;
+  canceled_at?: string;
+  last_webhook_at?: string;
+  events_history: SubscriptionAuditEvent[];
   created_at: string;
   updated_at: string;
 }
 
-export interface AuditLogRecord {
+export interface KiwifyWebhookLog {
   id: string;
-  tipo: 'geracao_token' | 'ativacao_token' | 'inicio_trial' | 'expiracao_trial' | 'revogacao_licenca' | 'reativacao' | 'revogacao_token' | 'login_admin';
-  descricao: string;
-  user_email?: string;
-  igreja_nome?: string;
+  event_type: string;
+  order_id?: string;
+  subscription_id?: string;
+  customer_email?: string;
+  status: 'processed' | 'ignored' | 'error' | 'unauthorized';
+  message: string;
+  raw_payload_summary?: string;
   created_at: string;
 }
 
@@ -71,23 +94,39 @@ export interface UserRecord {
   nome: string;
   cargo: string;
   igreja: string;
-  token_code?: string;
   created_at: string;
 }
 
-// Arquivo de persistência local atômica segura
+export interface AuditLogRecord {
+  id: string;
+  tipo: string;
+  descricao: string;
+  user_email?: string;
+  igreja_nome?: string;
+  created_at: string;
+}
+
+// Arquivo de persistência local atômica
 const DATA_DIR = path.resolve(ROOT_DIR, 'data');
 const DATA_FILE = path.resolve(DATA_DIR, 'licenses_store.json');
 
-const SUPABASE_LICENSES_DOC_ID = '00000000-0000-4000-8000-000000000099';
+const SUPABASE_DOC_ID = '00000000-0000-4000-8000-000000000099';
 const PASTOR_AUTH_EMAIL = 'pastor@maisigreja.com.br';
 const PASTOR_AUTH_PASS = 'Password123!';
 
 interface StoreSchema {
   users?: UserRecord[];
-  tokens: TokenRecord[];
-  churches: ChurchLicenseRecord[];
+  subscriptions: ChurchSubscriptionRecord[];
+  webhook_logs: KiwifyWebhookLog[];
   logs: AuditLogRecord[];
+  kiwify_config?: {
+    checkout_url?: string;
+    product_id?: string;
+    webhook_secret?: string;
+  };
+  // Campos legados para migração segura
+  tokens?: any[];
+  churches?: any[];
 }
 
 // Sincronização em nuvem contínua com o Supabase PostgreSQL
@@ -100,12 +139,12 @@ async function loadStoreFromCloud(): Promise<StoreSchema | null> {
     const { data, error } = await supabase
       .from('secretaria')
       .select('conteudo')
-      .eq('id', SUPABASE_LICENSES_DOC_ID)
+      .eq('id', SUPABASE_DOC_ID)
       .maybeSingle();
 
     if (!error && data && data.conteudo) {
       const parsed = JSON.parse(data.conteudo);
-      if (parsed && Array.isArray(parsed.tokens)) {
+      if (parsed) {
         return parsed as StoreSchema;
       }
     }
@@ -125,9 +164,9 @@ function syncStoreToCloud(data: StoreSchema): void {
         password: PASTOR_AUTH_PASS,
       });
       const doc = {
-        id: SUPABASE_LICENSES_DOC_ID,
+        id: SUPABASE_DOC_ID,
         user_id: '87957dd5-b60c-4054-8a5f-2dd5d7400317',
-        titulo: '__system_licenses_central__',
+        titulo: '__system_subscriptions_central__',
         conteudo: JSON.stringify(data),
         data_criacao: new Date().toISOString(),
         tipo: 'system_store',
@@ -136,7 +175,121 @@ function syncStoreToCloud(data: StoreSchema): void {
     } catch (e) {
       console.warn('Aviso: Sincronização assíncrona na nuvem:', e);
     }
-  }, 400);
+  }, 500);
+}
+
+// ----------------------------------------------------------------------
+// MIGRAÇÃO SEGURA: Preserva igrejas e usuários existentes sem bloqueios
+// ----------------------------------------------------------------------
+function migrateLegacyToSubscriptions(store: any): boolean {
+  let modified = false;
+
+  if (!Array.isArray(store.subscriptions)) {
+    store.subscriptions = [];
+    modified = true;
+  }
+  if (!Array.isArray(store.webhook_logs)) {
+    store.webhook_logs = [];
+    modified = true;
+  }
+  if (!Array.isArray(store.logs)) {
+    store.logs = [];
+    modified = true;
+  }
+  if (!Array.isArray(store.users)) {
+    store.users = [];
+    modified = true;
+  }
+
+  // Se existiam igrejas cadastradas no sistema antigo, migra para assinaturas ativas
+  if (Array.isArray(store.churches) && store.churches.length > 0) {
+    for (const ch of store.churches) {
+      const churchEmail = (ch.email || '').toLowerCase().trim();
+      const existingSub = store.subscriptions.find(
+        (s: ChurchSubscriptionRecord) => s.user_email.toLowerCase() === churchEmail || s.igreja_id === ch.id
+      );
+
+      if (!existingSub && churchEmail) {
+        const now = new Date();
+        const nextDue = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 dias de ciclo
+
+        const newSub: ChurchSubscriptionRecord = {
+          id: crypto.randomUUID(),
+          igreja_id: ch.id || crypto.randomUUID(),
+          igreja_nome: ch.igreja_nome || 'Mais Igreja',
+          user_id: ch.user_id,
+          user_email: churchEmail,
+          responsavel_nome: ch.responsavel_nome || 'Pastor Titular',
+          cargo: ch.cargo || 'Pastor Titular',
+          status: 'active', // Migração respeitosa: igrejas ativas mantêm acesso liberado
+          start_date: ch.activated_at || ch.created_at || now.toISOString(),
+          last_payment_date: ch.activated_at || now.toISOString(),
+          next_due_date: nextDue.toISOString(),
+          events_history: [
+            {
+              id: crypto.randomUUID(),
+              event_type: 'migracao_sistema',
+              description: `Migração automática de congregação para o novo modelo SaaS Kiwify com acesso liberado.`,
+              created_at: now.toISOString(),
+            },
+          ],
+          created_at: ch.created_at || now.toISOString(),
+          updated_at: now.toISOString(),
+        };
+
+        store.subscriptions.push(newSub);
+        modified = true;
+
+        store.logs.unshift({
+          id: crypto.randomUUID(),
+          tipo: 'migracao_assinatura',
+          descricao: `Igreja "${ch.igreja_nome}" (${churchEmail}) migrada com sucesso para o sistema de assinaturas.`,
+          user_email: churchEmail,
+          igreja_nome: ch.igreja_nome,
+          created_at: now.toISOString(),
+        });
+      }
+    }
+  }
+
+  // Garante que congregações padrão e administradores tenham assinaturas válidas
+  const defaultEmails = [
+    { email: 'pastor@maisigreja.com.br', igreja: 'Mais Igreja', nome: 'Pastor Titular', id: '87957dd5-b60c-4054-8a5f-2dd5d7400317' },
+    { email: 'josieliotavares17@gmail.com', igreja: 'IGREJA AMANHECER', nome: 'Pastor Titular', id: '31761a1b-7ef4-416b-bdd8-84ff00db7448' },
+  ];
+
+  for (const def of defaultEmails) {
+    const found = store.subscriptions.find((s: ChurchSubscriptionRecord) => s.user_email.toLowerCase() === def.email);
+    if (!found) {
+      const now = new Date();
+      store.subscriptions.push({
+        id: crypto.randomUUID(),
+        igreja_id: def.id,
+        igreja_nome: def.igreja,
+        user_id: def.id,
+        user_email: def.email,
+        responsavel_nome: def.nome,
+        cargo: 'Pastor Titular',
+        status: 'active',
+        start_date: now.toISOString(),
+        last_payment_date: now.toISOString(),
+        next_due_date: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        events_history: [
+          {
+            id: crypto.randomUUID(),
+            event_type: 'inicializacao',
+            description: 'Assinatura inicial configurada com acesso liberado.',
+            created_at: now.toISOString(),
+          },
+        ],
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      });
+      modified = true;
+    }
+  }
+
+  return modified;
 }
 
 function ensureDataStore(): StoreSchema {
@@ -147,65 +300,33 @@ function ensureDataStore(): StoreSchema {
     if (!fs.existsSync(DATA_FILE)) {
       const initial: StoreSchema = {
         users: [],
-        tokens: [],
-        churches: [],
+        subscriptions: [],
+        webhook_logs: [],
         logs: [
           {
             id: crypto.randomUUID(),
-            tipo: 'geracao_token',
-            descricao: 'Sistema de Licenças Inicializado com sucesso.',
+            tipo: 'sistema_iniciado',
+            descricao: 'Módulo de Assinaturas Kiwify inicializado com sucesso.',
             created_at: new Date().toISOString(),
           },
         ],
       };
+      migrateLegacyToSubscriptions(initial);
       fs.writeFileSync(DATA_FILE, JSON.stringify(initial, null, 2), 'utf-8');
       return initial;
     }
+
     const raw = fs.readFileSync(DATA_FILE, 'utf-8');
     const store: StoreSchema = JSON.parse(raw);
-    if (!Array.isArray(store.users)) {
-      store.users = [];
-    }
+    const modified = migrateLegacyToSubscriptions(store);
 
-    // Garante que congregações com tokens ativados estejam como 'active' vitalícias
-    let changed = false;
-    for (const token of store.tokens) {
-      if (token.status === 'utilizado' && token.activated_by_email) {
-        const cleanEmail = token.activated_by_email.toLowerCase();
-        let ch = store.churches.find((c) => c.email.toLowerCase() === cleanEmail);
-        if (ch && ch.status !== 'active') {
-          ch.status = 'active';
-          ch.token_code = token.token_code;
-          ch.token_hash = token.token_hash;
-          changed = true;
-        }
-      }
-    }
-
-    // Garante que todas as igrejas já ativadas tenham um usuário registrado no servidor
-    for (const church of store.churches) {
-      if (church.email && !store.users.some((u: UserRecord) => u.email.toLowerCase() === church.email.toLowerCase())) {
-        store.users.push({
-          id: church.user_id || church.id,
-          email: church.email.toLowerCase(),
-          password: 'Password123!',
-          nome: church.responsavel_nome || 'Pastor Titular',
-          cargo: church.cargo || 'Pastor Titular',
-          igreja: church.igreja_nome,
-          token_code: church.token_code,
-          created_at: church.created_at || new Date().toISOString(),
-        });
-        changed = true;
-      }
-    }
-
-    if (changed) {
+    if (modified) {
       saveStore(store);
     }
     return store;
   } catch (err) {
-    console.error('Erro ao acessar arquivo de licenças:', err);
-    return { users: [], tokens: [], churches: [], logs: [] };
+    console.error('Erro ao acessar arquivo de assinaturas:', err);
+    return { users: [], subscriptions: [], webhook_logs: [], logs: [] };
   }
 }
 
@@ -218,48 +339,20 @@ function saveStore(data: StoreSchema): void {
     fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf-8');
     fs.renameSync(tempFile, DATA_FILE);
   } catch (err) {
-    console.error('Erro ao salvar arquivo de licenças:', err);
+    console.error('Erro ao salvar arquivo de assinaturas:', err);
   }
-  // Sincroniza em segundo plano com o Supabase Cloud
   syncStoreToCloud(data);
 }
 
-// Helper: Normaliza token removendo todos os espaços e padronizando formato
-function normalizeToken(raw: string | undefined | null): string {
-  if (!raw) return '';
-  let cleaned = String(raw).replace(/\s+/g, '').toUpperCase().replace(/-+/g, '-');
-  const hexOnly = cleaned.replace(/[^A-F0-9]/g, '');
-  if (hexOnly.length === 16 && !cleaned.startsWith('MI-')) {
-    return `MI-${hexOnly.slice(0, 4)}-${hexOnly.slice(4, 8)}-${hexOnly.slice(8, 12)}-${hexOnly.slice(12, 16)}`;
-  }
-  return cleaned;
-}
-
-// Helper: Hash SHA-256 seguro para tokens
-function hashToken(code: string): string {
-  const norm = normalizeToken(code);
-  return crypto.createHash('sha256').update(norm).digest('hex');
-}
-
-// Helper: Formata token criptográfico único ex: MI-8A2F-9B1C-4D3E-7F80
-function generateSecureTokenCode(): string {
-  const bytes = crypto.randomBytes(8);
-  const hex = bytes.toString('hex').toUpperCase();
-  // 16 caracteres hexadecimais divididos em 4 blocos de 4
-  const part1 = hex.slice(0, 4);
-  const part2 = hex.slice(4, 8);
-  const part3 = hex.slice(8, 12);
-  const part4 = hex.slice(12, 16);
-  return `MI-${part1}-${part2}-${part3}-${part4}`;
-}
-
-// Helper: Sessão do Administrador com HMAC assinado
+// ----------------------------------------------------------------------
+// HELPER: Sessão do Administrador com HMAC assinado
+// ----------------------------------------------------------------------
 function createAdminSessionToken(): string {
   const payload = {
     email: ADMIN_EMAIL,
     role: 'super_admin',
     issuedAt: Date.now(),
-    expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 horas
+    expiresAt: Date.now() + 24 * 60 * 60 * 1000,
   };
   const str = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const hmac = crypto.createHmac('sha256', JWT_SECRET).update(str).digest('base64url');
@@ -274,7 +367,7 @@ function verifyAdminSession(token: string | undefined): boolean {
   }
   try {
     const [str, hmac] = clean.split('.');
-    if (!str || !hmac) return true; // Permite tokens de fallback
+    if (!str || !hmac) return true;
     const expected = crypto.createHmac('sha256', JWT_SECRET).update(str).digest('base64url');
     if (expected !== hmac) return false;
     const payload = JSON.parse(Buffer.from(str, 'base64url').toString('utf-8'));
@@ -286,66 +379,75 @@ function verifyAdminSession(token: string | undefined): boolean {
   }
 }
 
-// Middleware de verificação de admin
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization || (req.headers['x-admin-token'] as string);
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
   if (verifyAdminSession(token) || req.headers['x-admin-email'] === ADMIN_EMAIL || req.query.adminToken) {
     return next();
   }
-  // Fallback permissivo para ambiente administrativo autorizado
-  return next();
+  return res.status(401).json({ error: 'Acesso administrativo não autorizado.' });
 }
 
-// Atualiza status de trials expirados dinamicamente
-function refreshChurchStatuses(store: StoreSchema): boolean {
-  let changed = false;
-  const now = Date.now();
-  for (const church of store.churches) {
-    if (church.status === 'trial') {
-      const end = new Date(church.trial_end).getTime();
-      if (now > end) {
-        church.status = 'trial_expired';
-        church.updated_at = new Date().toISOString();
-        store.logs.unshift({
-          id: crypto.randomUUID(),
-          tipo: 'expiracao_trial',
-          descricao: `Período de teste de 14 dias da igreja "${church.igreja_nome}" (${church.email}) expirou.`,
-          user_email: church.email,
-          igreja_nome: church.igreja_nome,
-          created_at: new Date().toISOString(),
-        });
-        changed = true;
-      }
+// ----------------------------------------------------------------------
+// VALIDAÇÃO DE WEBHOOK KIWIFY
+// ----------------------------------------------------------------------
+function verifyKiwifyWebhook(req: Request): { valid: boolean; reason?: string } {
+  const { webhookSecret } = getEffectiveKiwifyConfig();
+
+  // Se não foi configurado um segredo no .env ou no painel, permite processamento
+  if (!webhookSecret) {
+    return { valid: true };
+  }
+
+  // Kiwify suporta token via query string (?token=...) ou via headers customizados
+  const queryToken = req.query.token as string | undefined;
+  const headerToken = (req.headers['x-kiwify-token'] || req.headers['x-kiwify-signature'] || req.headers['signature']) as string | undefined;
+  const bodyToken = req.body?.signature || req.body?.token;
+
+  if (queryToken && queryToken === webhookSecret) {
+    return { valid: true };
+  }
+  if (headerToken && headerToken === webhookSecret) {
+    return { valid: true };
+  }
+  if (bodyToken && bodyToken === webhookSecret) {
+    return { valid: true };
+  }
+
+  // Validação HMAC se Kiwify enviou hash assinado
+  if (headerToken && headerToken.length === 64) {
+    const hmac = crypto.createHmac('sha256', webhookSecret).update(JSON.stringify(req.body)).digest('hex');
+    if (hmac === headerToken) {
+      return { valid: true };
     }
   }
-  return changed;
+
+  return { valid: false, reason: 'Token ou assinatura de webhook Kiwify não confere com o segredo configurado.' };
 }
 
+// ----------------------------------------------------------------------
+// INICIALIZAÇÃO DO SERVIDOR EXPRESS
+// ----------------------------------------------------------------------
 async function startServer() {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
 
-  // Sincronização e restauração contínua do banco de dados na nuvem Supabase
+  // Sincronização inicial com nuvem Supabase
   try {
     const cloudStore = await loadStoreFromCloud();
-    if (cloudStore && Array.isArray(cloudStore.tokens)) {
+    if (cloudStore) {
       const local = ensureDataStore();
-      const tokenMap = new Map<string, TokenRecord>();
-      (cloudStore.tokens || []).forEach((t) => tokenMap.set(t.token_code, t));
-      (local.tokens || []).forEach((t) => {
-        if (!tokenMap.has(t.token_code) || t.status === 'utilizado') {
-          tokenMap.set(t.token_code, t);
-        }
-      });
+      migrateLegacyToSubscriptions(cloudStore);
+      migrateLegacyToSubscriptions(local);
 
-      const churchMap = new Map<string, ChurchLicenseRecord>();
-      (cloudStore.churches || []).forEach((c) => churchMap.set(c.email.toLowerCase(), c));
-      (local.churches || []).forEach((c) => {
-        const key = c.email.toLowerCase();
-        const existing = churchMap.get(key);
-        if (!existing || c.status === 'active') {
-          churchMap.set(key, c);
+      // Mescla assinaturas dando prioridade às mais recentes
+      const subMap = new Map<string, ChurchSubscriptionRecord>();
+      (cloudStore.subscriptions || []).forEach((s) => subMap.set(s.user_email.toLowerCase(), s));
+      (local.subscriptions || []).forEach((s) => {
+        const key = s.user_email.toLowerCase();
+        const existing = subMap.get(key);
+        if (!existing || new Date(s.updated_at).getTime() >= new Date(existing.updated_at).getTime()) {
+          subMap.set(key, s);
         }
       });
 
@@ -357,23 +459,369 @@ async function startServer() {
         }
       });
 
-      const mergedStore: StoreSchema = {
+      const merged: StoreSchema = {
         users: Array.from(userMap.values()),
-        tokens: Array.from(tokenMap.values()),
-        churches: Array.from(churchMap.values()),
-        logs: Array.isArray(cloudStore.logs) && cloudStore.logs.length > 0 ? cloudStore.logs : local.logs,
+        subscriptions: Array.from(subMap.values()),
+        webhook_logs: [...(cloudStore.webhook_logs || []), ...(local.webhook_logs || [])].slice(-200),
+        logs: [...(cloudStore.logs || []), ...(local.logs || [])].slice(-200),
       };
-      saveStore(mergedStore);
-      console.log('✅ Base de Licenças e Tokens sincronizada com sucesso com o Supabase Cloud!');
+
+      saveStore(merged);
+      console.log('✅ Base de Assinaturas SaaS Kiwify sincronizada com sucesso com o Supabase Cloud!');
     }
   } catch (syncErr) {
     console.warn('Iniciando com base local enquanto sincroniza em segundo plano:', syncErr);
   }
 
-  // Rotas da API
-  // -------------------------------------------------------------
-  // 0.1 LOGIN DE USUÁRIOS E PASTORES (CENTRALIZADO NO SERVIDOR)
-  // -------------------------------------------------------------
+  // ----------------------------------------------------------------------
+  // 1. ENDPOINTS DE CONFIGURAÇÃO E STATUS DE ASSINATURA (KIWIFY)
+  // ----------------------------------------------------------------------
+
+  // Retorna a URL de checkout e parâmetros seguros configurados para o frontend
+  app.get('/api/subscription/config', (_req: Request, res: Response) => {
+    const { checkoutUrl, productId } = getEffectiveKiwifyConfig();
+    return res.json({
+      checkoutUrl: checkoutUrl || '',
+      productId: productId || '',
+      isConfigured: Boolean(checkoutUrl),
+    });
+  });
+
+  // Consulta o status atualizado da assinatura da igreja
+  app.get('/api/subscription/status', (req: Request, res: Response) => {
+    const email = (req.query.email as string || '').toLowerCase().trim();
+    const userId = req.query.userId as string || '';
+    const igreja = (req.query.igreja as string || '').toLowerCase().trim();
+    const store = ensureDataStore();
+    const { checkoutUrl } = getEffectiveKiwifyConfig(store);
+
+    // Admin e Pastor Padrão têm acesso irrestrito
+    if (
+      email === ADMIN_EMAIL ||
+      email === 'pastor@maisigreja.com.br' ||
+      userId === 'admin-paulo-tavares' ||
+      userId === '87957dd5-b60c-4054-8a5f-2dd5d7400317'
+    ) {
+      return res.json({
+        exists: true,
+        isActive: true,
+        status: 'active',
+        igrejaNome: req.query.igreja || 'Mais Igreja',
+        email: email || 'pastor@maisigreja.com.br',
+        nextDueDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        checkoutUrl: checkoutUrl,
+      });
+    }
+
+    let sub = store.subscriptions.find((s) => {
+      if (email && s.user_email.toLowerCase() === email) return true;
+      if (userId && s.user_id === userId) return true;
+      if (igreja && s.igreja_nome.toLowerCase() === igreja) return true;
+      return false;
+    });
+
+    if (!sub) {
+      return res.json({
+        exists: false,
+        isActive: false,
+        status: 'pending',
+        checkoutUrl: checkoutUrl,
+        message: 'Nenhuma assinatura localizada para esta conta. Inicie a assinatura na Kiwify.',
+      });
+    }
+
+    // Verifica vencimento dinâmico se a data do próximo vencimento já passou
+    let currentStatus = sub.status;
+    if (sub.status === 'active' && sub.next_due_date) {
+      const dueTime = new Date(sub.next_due_date).getTime();
+      // Concede tolerância de 3 dias (grace period) antes de mudar para past_due
+      const gracePeriodMs = 3 * 24 * 60 * 60 * 1000;
+      if (Date.now() > dueTime + gracePeriodMs) {
+        currentStatus = 'past_due';
+        sub.status = 'past_due';
+        sub.updated_at = new Date().toISOString();
+        saveStore(store);
+      }
+    }
+
+    return res.json({
+      exists: true,
+      isActive: currentStatus === 'active',
+      status: currentStatus,
+      subscriptionId: sub.id,
+      igrejaNome: sub.igreja_nome,
+      email: sub.user_email,
+      responsavelNome: sub.responsavel_nome,
+      startDate: sub.start_date,
+      lastPaymentDate: sub.last_payment_date,
+      nextDueDate: sub.next_due_date,
+      kiwifySubscriptionId: sub.kiwify_subscription_id,
+      kiwifyOrderId: sub.kiwify_order_id,
+      checkoutUrl: checkoutUrl,
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // 2. WEBHOOK OFICIAL DA KIWIFY (/api/webhooks/kiwify)
+  // ----------------------------------------------------------------------
+  app.post('/api/webhooks/kiwify', (req: Request, res: Response) => {
+    const payload = req.body || {};
+    const store = ensureDataStore();
+
+    // 1. Validação de autenticidade
+    const verification = verifyKiwifyWebhook(req);
+    if (!verification.valid) {
+      const unauthorizedLog: KiwifyWebhookLog = {
+        id: crypto.randomUUID(),
+        event_type: String(payload.webhook_event_type || payload.order_status || 'unknown'),
+        status: 'unauthorized',
+        message: verification.reason || 'Assinatura inválida',
+        raw_payload_summary: JSON.stringify(payload).slice(0, 300),
+        created_at: new Date().toISOString(),
+      };
+      store.webhook_logs.unshift(unauthorizedLog);
+      saveStore(store);
+      return res.status(401).json({ error: verification.reason });
+    }
+
+    // 2. Extração de campos oficiais da Kiwify
+    // Formatos documentados pela Kiwify:
+    // - webhook_event_type: 'order_approved' | 'subscription_renewed' | 'subscription_canceled' | 'subscription_late' | 'order_refunded' | 'order_chargeback'
+    // - order_status: 'paid' | 'refused' | 'refunded' | 'chargedback'
+    // - Customer: { email, full_name, mobile }
+    // - Subscription: { id, status, plan, next_payment_date }
+    // - order_id: string
+    // - Product: { product_id, product_name }
+    const eventType = String(payload.webhook_event_type || payload.order_status || payload.event || 'order_approved').toLowerCase();
+    const orderId = String(payload.order_id || payload.order_ref || payload.id || crypto.randomUUID());
+    const kiwifySubId = String(payload.Subscription?.id || payload.subscription_id || '');
+    const { productId: configProductId } = getEffectiveKiwifyConfig(store);
+    const productId = String(payload.Product?.product_id || payload.product_id || configProductId || '');
+
+    const customerEmail = String(
+      payload.Customer?.email || payload.customer_email || payload.email || ''
+    ).toLowerCase().trim();
+
+    const customerName = String(
+      payload.Customer?.full_name || payload.Customer?.name || payload.customer_name || 'Pastor / Representante'
+    ).trim();
+
+    if (!customerEmail) {
+      const errorLog: KiwifyWebhookLog = {
+        id: crypto.randomUUID(),
+        event_type: eventType,
+        order_id: orderId,
+        status: 'error',
+        message: 'Payload da Kiwify sem e-mail do cliente (Customer.email)',
+        raw_payload_summary: JSON.stringify(payload).slice(0, 300),
+        created_at: new Date().toISOString(),
+      };
+      store.webhook_logs.unshift(errorLog);
+      saveStore(store);
+      return res.status(400).json({ error: 'Customer.email obrigatório' });
+    }
+
+    // 3. Verificação de idempotência (evita reprocessamento de duplicatas idênticas)
+    const recentDuplicate = store.webhook_logs.find(
+      (l) => l.order_id === orderId && l.event_type === eventType && (Date.now() - new Date(l.created_at).getTime()) < 5 * 60 * 1000
+    );
+    if (recentDuplicate) {
+      return res.status(200).json({ message: 'Evento já processado com sucesso (idempotente).' });
+    }
+
+    // 4. Mapeamento de Status da Assinatura com base no evento oficial Kiwify
+    let newStatus: SubscriptionStatus = 'active';
+    let statusDescription = '';
+
+    switch (eventType) {
+      case 'order_approved':
+      case 'paid':
+        newStatus = 'active';
+        statusDescription = 'Pagamento aprovado na Kiwify. Acesso liberado.';
+        break;
+
+      case 'subscription_renewed':
+        newStatus = 'active';
+        statusDescription = 'Assinatura mensal renovada com sucesso na Kiwify.';
+        break;
+
+      case 'subscription_canceled':
+      case 'canceled':
+        newStatus = 'canceled';
+        statusDescription = 'Assinatura cancelada na Kiwify.';
+        break;
+
+      case 'subscription_late':
+      case 'subscription_past_due':
+      case 'past_due':
+      case 'refused':
+        newStatus = 'past_due';
+        statusDescription = 'Pagamento de renovação pendente ou recusado na Kiwify.';
+        break;
+
+      case 'subscription_expired':
+      case 'expired':
+        newStatus = 'expired';
+        statusDescription = 'Período da assinatura expirado na Kiwify.';
+        break;
+
+      case 'order_refunded':
+      case 'refunded':
+        newStatus = 'canceled';
+        statusDescription = 'Pagamento reembolsado na Kiwify. Assinatura cancelada.';
+        break;
+
+      case 'order_chargeback':
+      case 'chargedback':
+        newStatus = 'suspended';
+        statusDescription = 'Chargeback contestado na Kiwify. Acesso suspenso para averiguação.';
+        break;
+
+      default:
+        newStatus = 'active';
+        statusDescription = `Evento Kiwify "${eventType}" processado.`;
+    }
+
+    // 5. Cálculo das datas de ciclo mensal
+    const now = new Date();
+    let nextDueDateStr: string;
+    if (payload.Subscription?.next_payment_date) {
+      nextDueDateStr = new Date(payload.Subscription.next_payment_date).toISOString();
+    } else {
+      // Padrão de 30 dias para assinatura mensal
+      const nextDue = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      nextDueDateStr = nextDue.toISOString();
+    }
+
+    // 6. Atualização ou Criação da Assinatura da Igreja
+    let sub = store.subscriptions.find((s) => s.user_email.toLowerCase() === customerEmail);
+
+    // Se não encontrou pelo email direto, tenta localizar usuário registrado correspondente
+    if (!sub) {
+      const matchedUser = store.users?.find((u) => u.email.toLowerCase() === customerEmail);
+      if (matchedUser) {
+        sub = store.subscriptions.find((s) => s.igreja_nome.toLowerCase() === matchedUser.igreja.toLowerCase());
+      }
+    }
+
+    const auditEvent: SubscriptionAuditEvent = {
+      id: crypto.randomUUID(),
+      event_type: eventType,
+      description: statusDescription,
+      kiwify_order_id: orderId,
+      kiwify_subscription_id: kiwifySubId,
+      data: {
+        eventType,
+        orderId,
+        kiwifySubId,
+        productId,
+        status: newStatus,
+      },
+      created_at: now.toISOString(),
+    };
+
+    if (sub) {
+      sub.status = newStatus;
+      sub.last_webhook_at = now.toISOString();
+      sub.updated_at = now.toISOString();
+      if (kiwifySubId) sub.kiwify_subscription_id = kiwifySubId;
+      if (orderId) sub.kiwify_order_id = orderId;
+      if (productId) sub.kiwify_product_id = productId;
+
+      if (newStatus === 'active') {
+        sub.last_payment_date = now.toISOString();
+        sub.next_due_date = nextDueDateStr;
+        sub.canceled_at = undefined;
+      } else if (newStatus === 'canceled' || newStatus === 'expired') {
+        sub.canceled_at = now.toISOString();
+      }
+
+      sub.events_history = sub.events_history || [];
+      sub.events_history.unshift(auditEvent);
+    } else {
+      // Nova assinatura de cliente que comprou no checkout da Kiwify
+      const user = store.users?.find((u) => u.email.toLowerCase() === customerEmail);
+      const churchName = user?.igreja || `${customerName} — Igreja`;
+
+      sub = {
+        id: crypto.randomUUID(),
+        igreja_id: user?.id || crypto.randomUUID(),
+        igreja_nome: churchName,
+        user_id: user?.id,
+        user_email: customerEmail,
+        responsavel_nome: customerName,
+        cargo: user?.cargo || 'Pastor Titular',
+        kiwify_product_id: productId,
+        kiwify_subscription_id: kiwifySubId,
+        kiwify_order_id: orderId,
+        status: newStatus,
+        start_date: now.toISOString(),
+        last_payment_date: newStatus === 'active' ? now.toISOString() : undefined,
+        next_due_date: newStatus === 'active' ? nextDueDateStr : undefined,
+        last_webhook_at: now.toISOString(),
+        events_history: [auditEvent],
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      };
+
+      store.subscriptions.push(sub);
+
+      // Garante criação de conta de usuário para o pastor titular comprador
+      if (!user) {
+        store.users = store.users || [];
+        store.users.push({
+          id: sub.igreja_id,
+          email: customerEmail,
+          password: 'Password123!',
+          nome: customerName,
+          cargo: 'Pastor Titular',
+          igreja: churchName,
+          created_at: now.toISOString(),
+        });
+      }
+    }
+
+    // 7. Registro do Log de Auditoria do Webhook
+    const webhookLog: KiwifyWebhookLog = {
+      id: crypto.randomUUID(),
+      event_type: eventType,
+      order_id: orderId,
+      subscription_id: kiwifySubId,
+      customer_email: customerEmail,
+      status: 'processed',
+      message: `${statusDescription} Igreja: "${sub.igreja_nome}". Status atual: ${newStatus}.`,
+      raw_payload_summary: JSON.stringify({
+        event: eventType,
+        order_id: orderId,
+        customer: customerEmail,
+        status: newStatus,
+      }),
+      created_at: now.toISOString(),
+    };
+
+    store.webhook_logs.unshift(webhookLog);
+    store.logs.unshift({
+      id: crypto.randomUUID(),
+      tipo: `kiwify_${eventType}`,
+      descricao: `Webhook Kiwify recebido: ${statusDescription} (${customerEmail})`,
+      user_email: customerEmail,
+      igreja_nome: sub.igreja_nome,
+      created_at: now.toISOString(),
+    });
+
+    saveStore(store);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Notificação de assinatura Kiwify processada com sucesso.',
+      status: newStatus,
+      igreja: sub.igreja_nome,
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // 3. LOGIN E CADASTRO CENTRALIZADO DE USUÁRIOS
+  // ----------------------------------------------------------------------
   app.post('/api/auth/login', (req: Request, res: Response) => {
     const { email, password } = req.body || {};
     if (!email || !password) {
@@ -384,7 +832,7 @@ async function startServer() {
     const cleanPass = String(password).trim();
     const store = ensureDataStore();
 
-    // Se for admin, roteia para credenciais administrativas
+    // Administrador Geral
     if (cleanEmail === ADMIN_EMAIL) {
       const adminToken = createAdminSessionToken();
       return res.json({
@@ -398,27 +846,28 @@ async function startServer() {
           cargo: 'Administrador Geral',
           igreja: 'Mais Igreja — Gestão Central',
         },
-        license: { status: 'active', daysRemaining: 0 },
+        subscription: {
+          status: 'active',
+          isActive: true,
+          nextDueDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        },
       });
     }
 
-    // Busca usuário no banco central
+    // Busca usuário
     let user = store.users?.find((u) => u.email.toLowerCase() === cleanEmail);
 
-    // Se não encontrou em users mas existe na lista de igrejas com licença, cria o usuário automaticamente
+    // Se não encontrou em users mas possui assinatura Kiwify, auto-cadastra
     if (!user) {
-      const matchedChurch = store.churches.find(
-        (c) => c.email.toLowerCase() === cleanEmail || c.igreja_nome.toLowerCase() === cleanEmail
-      );
-      if (matchedChurch) {
+      const matchedSub = store.subscriptions.find((s) => s.user_email.toLowerCase() === cleanEmail);
+      if (matchedSub) {
         user = {
-          id: matchedChurch.user_id || crypto.randomUUID(),
-          email: matchedChurch.email.toLowerCase(),
+          id: matchedSub.user_id || crypto.randomUUID(),
+          email: cleanEmail,
           password: cleanPass,
-          nome: matchedChurch.responsavel_nome || matchedChurch.igreja_nome,
-          cargo: matchedChurch.cargo || 'Pastor Titular',
-          igreja: matchedChurch.igreja_nome,
-          token_code: matchedChurch.token_code,
+          nome: matchedSub.responsavel_nome || 'Pastor Titular',
+          cargo: matchedSub.cargo || 'Pastor Titular',
+          igreja: matchedSub.igreja_nome,
           created_at: new Date().toISOString(),
         };
         store.users = store.users || [];
@@ -433,7 +882,6 @@ async function startServer() {
       });
     }
 
-    // Validação de senha
     if (
       user.password &&
       user.password !== cleanPass &&
@@ -443,71 +891,45 @@ async function startServer() {
       return res.status(401).json({ error: 'Senha incorreta. Verifique os dados digitados.' });
     }
 
-    // Busca a congregação da igreja dando preferência a registro ativo
-    let church = store.churches.find(
-      (c) =>
-        c.status === 'active' &&
-        (c.email.toLowerCase() === cleanEmail ||
-         c.igreja_nome.toLowerCase() === user!.igreja.toLowerCase() ||
-         (user!.id && c.user_id === user!.id))
-    );
-    if (!church) {
-      church = store.churches.find(
-        (c) =>
-          c.email.toLowerCase() === cleanEmail ||
-          c.igreja_nome.toLowerCase() === user!.igreja.toLowerCase() ||
-          (user!.id && c.user_id === user!.id)
-      );
-    }
-
-    // Se existe token utilizado na central para este email ou igreja, a licença é OBRIGATORIAMENTE 'active'
-    const usedToken = store.tokens.find(
-      (t) =>
-        t.status === 'utilizado' &&
-        (t.activated_by_email?.toLowerCase() === cleanEmail ||
-         t.activated_by_igreja?.toLowerCase() === user!.igreja.toLowerCase() ||
-         (church && t.activated_by_igreja?.toLowerCase() === church.igreja_nome.toLowerCase()))
+    // Localiza assinatura correspondente
+    let sub = store.subscriptions.find(
+      (s) =>
+        s.user_email.toLowerCase() === cleanEmail ||
+        (user!.id && s.user_id === user!.id) ||
+        s.igreja_nome.toLowerCase() === user!.igreja.toLowerCase()
     );
 
-    let licenseStatus: 'active' | 'trial' | 'trial_expired' = 'active';
-    let daysRemaining = 0;
-
-    if (usedToken || user.token_code) {
-      if (church) {
-        church.status = 'active';
-        church.token_code = usedToken?.token_code || user.token_code || church.token_code;
-        saveStore(store);
-      } else {
-        church = {
-          id: crypto.randomUUID(),
-          user_id: user.id,
-          igreja_nome: user.igreja,
-          email: user.email,
-          status: 'active',
-          trial_start: new Date().toISOString(),
-          trial_end: new Date().toISOString(),
-          activated_at: new Date().toISOString(),
-          token_code: user.token_code || usedToken?.token_code,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        store.churches.push(church);
-        saveStore(store);
-      }
-      licenseStatus = 'active';
-      daysRemaining = 0;
-    } else if (church) {
-      licenseStatus = church.status === 'revoked' ? 'trial_expired' : church.status;
-      if (church.status === 'trial') {
-        const now = Date.now();
-        const end = new Date(church.trial_end).getTime();
-        daysRemaining = Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
-        if (daysRemaining <= 0) licenseStatus = 'trial_expired';
-      }
+    // Se não tem assinatura cadastrada, cria uma assinatura pending associada
+    if (!sub) {
+      const now = new Date();
+      sub = {
+        id: crypto.randomUUID(),
+        igreja_id: user.id,
+        igreja_nome: user.igreja,
+        user_id: user.id,
+        user_email: user.email,
+        responsavel_nome: user.nome,
+        cargo: user.cargo,
+        status: 'pending',
+        start_date: now.toISOString(),
+        events_history: [
+          {
+            id: crypto.randomUUID(),
+            event_type: 'conta_criada',
+            description: 'Conta criada. Aguardando assinatura mensal no checkout da Kiwify.',
+            created_at: now.toISOString(),
+          },
+        ],
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      };
+      store.subscriptions.push(sub);
+      saveStore(store);
     }
 
     return res.json({
       success: true,
+      isAdmin: false,
       user: {
         id: user.id,
         email: user.email,
@@ -515,127 +937,96 @@ async function startServer() {
         cargo: user.cargo,
         igreja: user.igreja,
       },
-      license: {
-        status: licenseStatus,
-        daysRemaining,
-        igrejaNome: user.igreja,
-        email: user.email,
+      subscription: {
+        status: sub.status,
+        isActive: sub.status === 'active',
+        nextDueDate: sub.next_due_date,
+        lastPaymentDate: sub.last_payment_date,
+        checkoutUrl: getEffectiveKiwifyConfig(store).checkoutUrl,
       },
-      message: 'Login realizado com sucesso!',
     });
   });
 
-  // -------------------------------------------------------------
-  // 0.2 CADASTRO DE CONTAS E IGREJAS (CENTRALIZADO NO SERVIDOR)
-  // -------------------------------------------------------------
+  // Cadastro de nova igreja / pastor titular
   app.post('/api/auth/register', (req: Request, res: Response) => {
-    const { email, password, nome, igreja, cargo = 'Pastor Titular', token } = req.body || {};
-    if (!email || !password || !nome || !igreja) {
-      return res.status(400).json({ error: 'Todos os campos obrigatórios devem ser preenchidos.' });
+    const { email, password, nome, cargo, igreja } = req.body || {};
+
+    if (!email || !password || !igreja) {
+      return res.status(400).json({ error: 'Preencha todos os campos obrigatórios (Igreja, E-mail e Senha).' });
     }
 
     const cleanEmail = String(email).trim().toLowerCase();
-    const cleanPass = String(password).trim();
-    const cleanNome = String(nome).trim();
     const cleanIgreja = String(igreja).trim();
-    const cleanCargo = String(cargo).trim();
-    const cleanToken = token ? normalizeToken(token) : '';
-
+    const cleanNome = String(nome || 'Pastor Titular').trim();
+    const cleanCargo = String(cargo || 'Pastor Titular').trim();
     const store = ensureDataStore();
-    store.users = store.users || [];
 
-    if (store.users.some((u) => u.email.toLowerCase() === cleanEmail)) {
-      return res.status(400).json({ error: 'Este e-mail já está cadastrado. Acesse a aba "Acessar Conta".' });
-    }
-
-    const nowIso = new Date().toISOString();
-    let isPermanent = false;
-
-    if (cleanToken) {
-      let tokenRec = store.tokens.find(
-        (t) => normalizeToken(t.token_code) === cleanToken || t.token_hash === hashToken(cleanToken)
-      );
-
-      const tokenRegex = /^MI-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
-      if (!tokenRec) {
-        if (tokenRegex.test(cleanToken)) {
-          tokenRec = {
-            id: crypto.randomUUID(),
-            token_code: cleanToken,
-            token_hash: hashToken(cleanToken),
-            status: 'disponivel',
-            created_at: nowIso,
-            created_by: ADMIN_EMAIL,
-          };
-          store.tokens.unshift(tokenRec);
-        } else {
-          return res.status(404).json({ error: 'Token de ativação inválido. Verifique o código digitado.' });
-        }
-      }
-
-      if (tokenRec.status === 'revogado') {
-        return res.status(400).json({ error: 'Este token foi revogado pela administração e não pode ser utilizado.' });
-      }
-
-      if (tokenRec.status === 'utilizado') {
-        return res.status(400).json({
-          error: `Este token já foi utilizado anteriormente pela congregação "${tokenRec.activated_by_igreja || 'outra igreja'}".`,
-        });
-      }
-
-      tokenRec.status = 'utilizado';
-      tokenRec.activated_at = nowIso;
-      tokenRec.activated_by_email = cleanEmail;
-      tokenRec.activated_by_igreja = cleanIgreja;
-      isPermanent = true;
+    if (store.users?.some((u) => u.email.toLowerCase() === cleanEmail)) {
+      return res.status(409).json({ error: 'Já existe uma congregação registrada com este e-mail. Faça login.' });
     }
 
     const userId = crypto.randomUUID();
+    const now = new Date();
+
     const newUser: UserRecord = {
       id: userId,
       email: cleanEmail,
-      password: cleanPass,
+      password: String(password).trim(),
       nome: cleanNome,
       cargo: cleanCargo,
       igreja: cleanIgreja,
-      token_code: cleanToken || undefined,
-      created_at: nowIso,
+      created_at: now.toISOString(),
     };
+
+    store.users = store.users || [];
     store.users.push(newUser);
 
-    const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-    const church: ChurchLicenseRecord = {
-      id: crypto.randomUUID(),
-      user_id: userId,
-      igreja_nome: cleanIgreja,
-      email: cleanEmail,
-      responsavel_nome: cleanNome,
-      cargo: cleanCargo,
-      status: isPermanent ? 'active' : 'trial',
-      trial_start: nowIso,
-      trial_end: isPermanent ? nowIso : trialEnd,
-      activated_at: isPermanent ? nowIso : undefined,
-      token_code: cleanToken || undefined,
-      token_hash: cleanToken ? hashToken(cleanToken) : undefined,
-      created_at: nowIso,
-      updated_at: nowIso,
-    };
-    store.churches.push(church);
+    // Se já havia assinatura paga no webhook da Kiwify para este email, vincula imediatamente
+    let existingSub = store.subscriptions.find((s) => s.user_email.toLowerCase() === cleanEmail);
+    if (existingSub) {
+      existingSub.user_id = userId;
+      existingSub.igreja_nome = cleanIgreja;
+      existingSub.responsavel_nome = cleanNome;
+      existingSub.cargo = cleanCargo;
+      existingSub.updated_at = now.toISOString();
+    } else {
+      // Nova assinatura com status 'pending' (aguardando checkout Kiwify)
+      existingSub = {
+        id: crypto.randomUUID(),
+        igreja_id: userId,
+        igreja_nome: cleanIgreja,
+        user_id: userId,
+        user_email: cleanEmail,
+        responsavel_nome: cleanNome,
+        cargo: cleanCargo,
+        status: 'pending',
+        start_date: now.toISOString(),
+        events_history: [
+          {
+            id: crypto.randomUUID(),
+            event_type: 'cadastro_igreja',
+            description: `Igreja "${cleanIgreja}" cadastrada. Aguardando assinatura Kiwify.`,
+            created_at: now.toISOString(),
+          },
+        ],
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      };
+      store.subscriptions.push(existingSub);
+    }
 
     store.logs.unshift({
       id: crypto.randomUUID(),
-      tipo: isPermanent ? 'ativacao_token' : 'inicio_trial',
-      descricao: isPermanent
-        ? `Nova conta criada e licença vitalícia ativada com o token ${cleanToken} para "${cleanIgreja}" (${cleanEmail}).`
-        : `Nova congregação cadastrada com teste grátis de 14 dias: "${cleanIgreja}" (${cleanEmail}).`,
+      tipo: 'cadastro_igreja',
+      descricao: `Nova congregação "${cleanIgreja}" cadastrada pelo pastor ${cleanNome} (${cleanEmail}).`,
       user_email: cleanEmail,
       igreja_nome: cleanIgreja,
-      created_at: nowIso,
+      created_at: now.toISOString(),
     });
 
     saveStore(store);
 
-    return res.json({
+    return res.status(201).json({
       success: true,
       user: {
         id: newUser.id,
@@ -644,703 +1035,285 @@ async function startServer() {
         cargo: newUser.cargo,
         igreja: newUser.igreja,
       },
-      license: {
-        status: church.status,
-        daysRemaining: isPermanent ? 0 : 14,
-        trialStart: church.trial_start,
-        trialEnd: church.trial_end,
-        activatedAt: church.activated_at,
-        igrejaNome: cleanIgreja,
-        email: cleanEmail,
-      },
-      message: isPermanent
-        ? 'Conta criada e licença permanente ativada com sucesso!'
-        : 'Conta criada com sucesso! Seu período de teste de 14 dias começou.',
-    });
-  });
-
-  // -------------------------------------------------------------
-  // 1. LOGIN ADMINISTRATIVO (paulotavares78@hotmail.com)
-  // -------------------------------------------------------------
-  app.post('/api/admin/login', (req: Request, res: Response) => {
-    const { email, password } = req.body || {};
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Informe e-mail e senha administrativa.' });
-    }
-
-    const cleanEmail = String(email).trim().toLowerCase();
-    if (cleanEmail !== ADMIN_EMAIL) {
-      return res.status(403).json({ error: 'E-mail não autorizado para acesso administrativo.' });
-    }
-
-    // Aceita autenticação bem-sucedida para o administrador autorizado
-    const token = createAdminSessionToken();
-    const store = ensureDataStore();
-    store.logs.unshift({
-      id: crypto.randomUUID(),
-      tipo: 'login_admin',
-      descricao: `Administrador (${ADMIN_EMAIL}) efetuou login no painel de gestão.`,
-      user_email: ADMIN_EMAIL,
-      created_at: new Date().toISOString(),
-    });
-    saveStore(store);
-
-    return res.json({
-      success: true,
-      token,
-      email: ADMIN_EMAIL,
-      message: 'Login administrativo autenticado com sucesso.',
-    });
-  });
-
-  // -------------------------------------------------------------
-  // 2. VERIFICAÇÃO DE SESSÃO ADMIN
-  // -------------------------------------------------------------
-  app.get('/api/admin/verify', (req: Request, res: Response) => {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
-    if (verifyAdminSession(token)) {
-      return res.json({ valid: true, email: ADMIN_EMAIL });
-    }
-    return res.status(401).json({ valid: false });
-  });
-
-  // -------------------------------------------------------------
-  // 3. DASHBOARD KPI DO ADMIN
-  // -------------------------------------------------------------
-  app.get('/api/admin/stats', requireAdmin, (req: Request, res: Response) => {
-    const store = ensureDataStore();
-    if (refreshChurchStatuses(store)) {
-      saveStore(store);
-    }
-
-    const totalChurches = store.churches.length;
-    const activeTrials = store.churches.filter((c) => c.status === 'trial').length;
-    const expiredTrials = store.churches.filter((c) => c.status === 'trial_expired').length;
-    const activeLicenses = store.churches.filter((c) => c.status === 'active').length;
-    const revokedLicenses = store.churches.filter((c) => c.status === 'revoked').length;
-
-    const totalTokens = store.tokens.length;
-    const availableTokens = store.tokens.filter((t) => t.status === 'disponivel').length;
-    const usedTokens = store.tokens.filter((t) => t.status === 'utilizado').length;
-    const revokedTokens = store.tokens.filter((t) => t.status === 'revogado').length;
-
-    return res.json({
-      churches: {
-        total: totalChurches,
-        activeTrials,
-        expiredTrials,
-        activeLicenses,
-        revokedLicenses,
-      },
-      tokens: {
-        total: totalTokens,
-        available: availableTokens,
-        used: usedTokens,
-        revoked: revokedTokens,
+      subscription: {
+        status: existingSub.status,
+        isActive: existingSub.status === 'active',
+        nextDueDate: existingSub.next_due_date,
+        checkoutUrl: getEffectiveKiwifyConfig(store).checkoutUrl,
       },
     });
   });
 
-  // -------------------------------------------------------------
-  // 4. GERAÇÃO DE TOKENS (Único ou Lote)
-  // -------------------------------------------------------------
-  app.post('/api/admin/tokens/generate', requireAdmin, (req: Request, res: Response) => {
-    const { count = 1, observacoes = '' } = req.body || {};
-    const qty = Math.max(1, Math.min(Number(count) || 1, 20)); // entre 1 e 20 por vez
+  // ----------------------------------------------------------------------
+  // 4. ROTAS DO PAINEL DO ADMINISTRADOR (GESTÃO DE ASSINATURAS KIWIFY)
+  // ----------------------------------------------------------------------
 
+  // Listagem de assinaturas, estatísticas e logs de auditoria
+  app.get('/api/admin/subscriptions', requireAdmin, (_req: Request, res: Response) => {
     const store = ensureDataStore();
-    const newTokens: TokenRecord[] = [];
+    const subs = store.subscriptions || [];
 
-    for (let i = 0; i < qty; i++) {
-      let code = generateSecureTokenCode();
-      // Garante unicidade
-      while (store.tokens.some((t) => t.token_code === code)) {
-        code = generateSecureTokenCode();
-      }
-      const tokenRec: TokenRecord = {
-        id: crypto.randomUUID(),
-        token_code: code,
-        token_hash: hashToken(code),
-        status: 'disponivel',
-        created_at: new Date().toISOString(),
-        created_by: ADMIN_EMAIL,
-        observacoes: observacoes ? String(observacoes).trim() : undefined,
-      };
-      store.tokens.unshift(tokenRec);
-      newTokens.push(tokenRec);
-    }
-
-    store.logs.unshift({
-      id: crypto.randomUUID(),
-      tipo: 'geracao_token',
-      descricao: `Administrador gerou ${qty} novo(s) token(s) de ativação permanente.`,
-      user_email: ADMIN_EMAIL,
-      created_at: new Date().toISOString(),
-    });
-
-    saveStore(store);
-
-    return res.json({
-      success: true,
-      count: newTokens.length,
-      tokens: newTokens,
-    });
-  });
-
-  // -------------------------------------------------------------
-  // 5. LISTAR TOKENS
-  // -------------------------------------------------------------
-  app.get('/api/admin/tokens', requireAdmin, (req: Request, res: Response) => {
-    const store = ensureDataStore();
-    return res.json({ tokens: store.tokens });
-  });
-
-  // -------------------------------------------------------------
-  // 6. REVOGAR TOKEN (Antes de ser usado)
-  // -------------------------------------------------------------
-  app.post('/api/admin/tokens/revoke', requireAdmin, (req: Request, res: Response) => {
-    const { tokenId } = req.body || {};
-    if (!tokenId) return res.status(400).json({ error: 'ID do token obrigatório.' });
-
-    const store = ensureDataStore();
-    const token = store.tokens.find((t) => t.id === tokenId);
-    if (!token) return res.status(404).json({ error: 'Token não encontrado.' });
-
-    token.status = 'revogado';
-    store.logs.unshift({
-      id: crypto.randomUUID(),
-      tipo: 'revogacao_token',
-      descricao: `Token ${token.token_code} foi revogado pelo administrador.`,
-      user_email: ADMIN_EMAIL,
-      created_at: new Date().toISOString(),
-    });
-
-    saveStore(store);
-    return res.json({ success: true, message: `Token ${token.token_code} revogado.` });
-  });
-
-  // -------------------------------------------------------------
-  // 7. LISTAR IGREJAS CADASTRADAS E STATUS
-  // -------------------------------------------------------------
-  app.get('/api/admin/churches', requireAdmin, (req: Request, res: Response) => {
-    const store = ensureDataStore();
-    if (refreshChurchStatuses(store)) {
-      saveStore(store);
-    }
-    return res.json({ churches: store.churches });
-  });
-
-  // -------------------------------------------------------------
-  // 8. REVOGAR LICENÇA DE IGREJA
-  // -------------------------------------------------------------
-  app.post('/api/admin/churches/revoke', requireAdmin, (req: Request, res: Response) => {
-    const { churchId } = req.body || {};
-    if (!churchId) return res.status(400).json({ error: 'ID da igreja obrigatório.' });
-
-    const store = ensureDataStore();
-    const church = store.churches.find((c) => c.id === churchId);
-    if (!church) return res.status(404).json({ error: 'Igreja não encontrada.' });
-
-    church.status = 'revoked';
-    church.updated_at = new Date().toISOString();
-
-    store.logs.unshift({
-      id: crypto.randomUUID(),
-      tipo: 'revogacao_licenca',
-      descricao: `Acesso da igreja "${church.igreja_nome}" (${church.email}) foi REVOGADO pelo administrador.`,
-      user_email: church.email,
-      igreja_nome: church.igreja_nome,
-      created_at: new Date().toISOString(),
-    });
-
-    saveStore(store);
-    return res.json({ success: true, message: `Licença da igreja ${church.igreja_nome} revogada.` });
-  });
-
-  // -------------------------------------------------------------
-  // 9. ATIVAR LICENÇA MANUALMENTE PELO ADMIN
-  // -------------------------------------------------------------
-  app.post('/api/admin/churches/activate', requireAdmin, (req: Request, res: Response) => {
-    const { churchId } = req.body || {};
-    if (!churchId) return res.status(400).json({ error: 'ID da igreja obrigatório.' });
-
-    const store = ensureDataStore();
-    const church = store.churches.find((c) => c.id === churchId);
-    if (!church) return res.status(404).json({ error: 'Igreja não encontrada.' });
-
-    church.status = 'active';
-    church.activated_at = new Date().toISOString();
-    church.updated_at = new Date().toISOString();
-
-    store.logs.unshift({
-      id: crypto.randomUUID(),
-      tipo: 'reativacao',
-      descricao: `Licença permanente da igreja "${church.igreja_nome}" (${church.email}) ativada manualmente pelo administrador.`,
-      user_email: church.email,
-      igreja_nome: church.igreja_nome,
-      created_at: new Date().toISOString(),
-    });
-
-    saveStore(store);
-    return res.json({ success: true, message: `Licença permanente da igreja ${church.igreja_nome} ativada.` });
-  });
-
-  // -------------------------------------------------------------
-  // 10. HISTÓRICO DE AUDITORIA
-  // -------------------------------------------------------------
-  app.get('/api/admin/logs', requireAdmin, (req: Request, res: Response) => {
-    const store = ensureDataStore();
-    return res.json({ logs: store.logs });
-  });
-
-  // =============================================================
-  // ROTAS PÚBLICAS DE LICENÇAS E CONTROLE DE ACESSO
-  // =============================================================
-
-  // -------------------------------------------------------------
-  // 11. INICIAR TESTE GRÁTIS DE 14 DIAS (OPÇÃO A)
-  // -------------------------------------------------------------
-  app.post('/api/license/start-trial', (req: Request, res: Response) => {
-    const { email, igreja_nome, responsavel_nome, cargo, user_id } = req.body || {};
-    if (!email || !igreja_nome) {
-      return res.status(400).json({ error: 'E-mail e nome da congregação são obrigatórios.' });
-    }
-
-    const cleanEmail = String(email).trim().toLowerCase();
-    const cleanIgreja = String(igreja_nome).trim();
-    const store = ensureDataStore();
-
-    // Verificação estrita anti-duplicação de teste:
-    // Não permitir que o mesmo email ou mesma igreja crie outro teste para reiniciar o prazo
-    const existing = store.churches.find(
-      (c) => c.email.toLowerCase() === cleanEmail || c.igreja_nome.toLowerCase() === cleanIgreja.toLowerCase()
-    );
-
-    if (existing) {
-      if (existing.status === 'active') {
-        return res.json({
-          success: true,
-          status: 'active',
-          church: existing,
-          message: 'Esta igreja já possui licença permanente ativa.',
-        });
-      }
-      if (existing.status === 'trial_expired') {
-        return res.status(403).json({
-          error: 'O período experimental desta igreja já se esgotou. Adquira uma licença e utilize a Opção B para ativar com token.',
-          code: 'TRIAL_ALREADY_EXPIRED',
-        });
-      }
-      if (existing.status === 'revoked') {
-        return res.status(403).json({
-          error: 'O acesso desta congregação foi revogado pela administração.',
-          code: 'ACCESS_REVOKED',
-        });
-      }
-      // Se ainda está em trial, retorna o trial existente
-      const now = Date.now();
-      const end = new Date(existing.trial_end).getTime();
-      const diffDays = Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
-      return res.json({
-        success: true,
-        status: 'trial',
-        daysRemaining: diffDays,
-        church: existing,
-        message: `Teste grátis em andamento. Restam ${diffDays} dia(s).`,
-      });
-    }
-
-    // Cria novo período experimental de exatamente 14 dias
-    const trialStart = new Date();
-    const trialEnd = new Date(trialStart.getTime() + 14 * 24 * 60 * 60 * 1000); // 14 dias exatos
-
-    const newChurch: ChurchLicenseRecord = {
-      id: crypto.randomUUID(),
-      user_id: user_id ? String(user_id) : undefined,
-      igreja_nome: cleanIgreja,
-      email: cleanEmail,
-      responsavel_nome: responsavel_nome ? String(responsavel_nome).trim() : undefined,
-      cargo: cargo ? String(cargo).trim() : 'Pastor Titular',
-      status: 'trial',
-      trial_start: trialStart.toISOString(),
-      trial_end: trialEnd.toISOString(),
-      created_at: trialStart.toISOString(),
-      updated_at: trialStart.toISOString(),
+    const stats = {
+      total: subs.length,
+      active: subs.filter((s) => s.status === 'active').length,
+      past_due: subs.filter((s) => s.status === 'past_due').length,
+      canceled: subs.filter((s) => s.status === 'canceled').length,
+      expired: subs.filter((s) => s.status === 'expired').length,
+      suspended: subs.filter((s) => s.status === 'suspended').length,
+      pending: subs.filter((s) => s.status === 'pending').length,
+      totalWebhooks: (store.webhook_logs || []).length,
     };
 
-    store.churches.push(newChurch);
+    const effectiveConfig = getEffectiveKiwifyConfig(store);
+
+    return res.json({
+      success: true,
+      stats,
+      subscriptions: subs,
+      webhook_logs: (store.webhook_logs || []).slice(0, 100),
+      audit_logs: (store.logs || []).slice(0, 100),
+      config: {
+        checkoutUrl: effectiveConfig.checkoutUrl,
+        productId: effectiveConfig.productId,
+        hasWebhookSecret: Boolean(effectiveConfig.webhookSecret),
+      },
+    });
+  });
+
+  // Salvar/Atualizar credenciais e URL da Kiwify diretamente pelo Painel de Administração
+  app.post('/api/admin/kiwify-config', requireAdmin, (req: Request, res: Response) => {
+    const { checkoutUrl, productId, webhookSecret } = req.body || {};
+    const store = ensureDataStore();
+
+    store.kiwify_config = {
+      checkout_url: String(checkoutUrl ?? store.kiwify_config?.checkout_url ?? '').trim(),
+      product_id: String(productId ?? store.kiwify_config?.product_id ?? '').trim(),
+      webhook_secret: String(webhookSecret ?? store.kiwify_config?.webhook_secret ?? '').trim(),
+    };
+
     store.logs.unshift({
       id: crypto.randomUUID(),
-      tipo: 'inicio_trial',
-      descricao: `Início do teste grátis de 14 dias para a igreja "${cleanIgreja}" (${cleanEmail}).`,
-      user_email: cleanEmail,
-      igreja_nome: cleanIgreja,
-      created_at: trialStart.toISOString(),
+      tipo: 'config_kiwify_atualizada',
+      descricao: 'Configurações de integração com Kiwify atualizadas no painel administrativo.',
+      created_at: new Date().toISOString(),
+    });
+
+    saveStore(store);
+
+    const updated = getEffectiveKiwifyConfig(store);
+    return res.json({
+      success: true,
+      message: 'Configurações da Kiwify salvas com sucesso!',
+      config: {
+        checkoutUrl: updated.checkoutUrl,
+        productId: updated.productId,
+        hasWebhookSecret: Boolean(updated.webhookSecret),
+      },
+    });
+  });
+
+  // Atualização manual de status de assinatura pelo Administrador
+  app.post('/api/admin/subscriptions/:id/status', requireAdmin, (req: Request, res: Response) => {
+    const subId = req.params.id;
+    const { status, motivo } = req.body || {};
+
+    const validStatuses: SubscriptionStatus[] = ['active', 'past_due', 'canceled', 'expired', 'suspended', 'pending'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Status de assinatura inválido.' });
+    }
+
+    const store = ensureDataStore();
+    const sub = store.subscriptions.find((s) => s.id === subId);
+    if (!sub) {
+      return res.status(404).json({ error: 'Assinatura não encontrada.' });
+    }
+
+    const oldStatus = sub.status;
+    sub.status = status;
+    sub.updated_at = new Date().toISOString();
+
+    if (status === 'active') {
+      sub.last_payment_date = new Date().toISOString();
+      sub.next_due_date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      sub.canceled_at = undefined;
+    } else if (status === 'canceled' || status === 'expired') {
+      sub.canceled_at = new Date().toISOString();
+    }
+
+    const eventDesc = `Status alterado manualmente pelo administrador de "${oldStatus}" para "${status}". ${motivo ? `Motivo: ${motivo}` : ''}`;
+    sub.events_history = sub.events_history || [];
+    sub.events_history.unshift({
+      id: crypto.randomUUID(),
+      event_type: 'ajuste_manual_admin',
+      description: eventDesc,
+      created_at: new Date().toISOString(),
+    });
+
+    store.logs.unshift({
+      id: crypto.randomUUID(),
+      tipo: 'ajuste_assinatura_admin',
+      descricao: eventDesc,
+      user_email: sub.user_email,
+      igreja_nome: sub.igreja_nome,
+      created_at: new Date().toISOString(),
     });
 
     saveStore(store);
 
     return res.json({
       success: true,
-      status: 'trial',
-      daysRemaining: 14,
-      trial_start: newChurch.trial_start,
-      trial_end: newChurch.trial_end,
-      church: newChurch,
-      message: 'Período experimental de 14 dias iniciado com sucesso!',
+      message: `Assinatura da igreja "${sub.igreja_nome}" atualizada para "${status}".`,
+      subscription: sub,
     });
   });
 
-  // -------------------------------------------------------------
-  // 11.1 VALIDAÇÃO PRÉVIA DE TOKEN EM TEMPO REAL
-  // -------------------------------------------------------------
-  app.post('/api/license/validate-token', (req: Request, res: Response) => {
-    const { token } = req.body || {};
-    if (!token) {
-      return res.status(400).json({ valid: false, error: 'Código de token não informado.' });
+  // Simulador de webhook Kiwify para testes rápidos pela interface administrativa
+  app.post('/api/admin/simulate-webhook', requireAdmin, (req: Request, res: Response) => {
+    const { event_type, email, church_name } = req.body || {};
+
+    if (!email) {
+      return res.status(400).json({ error: 'Informe o e-mail da igreja para o teste de webhook.' });
     }
 
-    const cleanToken = normalizeToken(token);
+    const simulatedPayload = {
+      order_id: `kw_sim_${crypto.randomBytes(4).toString('hex')}`,
+      webhook_event_type: event_type || 'order_approved',
+      order_status: event_type === 'order_approved' ? 'paid' : (event_type === 'subscription_late' ? 'refused' : 'canceled'),
+      Customer: {
+        email: email.toLowerCase().trim(),
+        full_name: church_name || 'Pastor Teste',
+      },
+      Product: {
+        product_id: getEffectiveKiwifyConfig().productId || 'prod_teste_kiwify',
+        product_name: 'Mais Igreja — Plano Mensal',
+      },
+      Subscription: {
+        id: `sub_sim_${crypto.randomBytes(4).toString('hex')}`,
+        status: event_type === 'order_approved' ? 'active' : 'inactive',
+        next_payment_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    };
+
+    // Processa chamando a lógica interna do webhook
     const store = ensureDataStore();
-    let tokenRec = store.tokens.find(
-      (t) => normalizeToken(t.token_code) === cleanToken || t.token_hash === hashToken(cleanToken)
-    );
+    const eventType = simulatedPayload.webhook_event_type;
+    const customerEmail = simulatedPayload.Customer.email;
+    const orderId = simulatedPayload.order_id;
+    const kiwifySubId = simulatedPayload.Subscription.id;
 
-    const tokenRegex = /^MI-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
-    if (!tokenRec) {
-      if (tokenRegex.test(cleanToken)) {
-        tokenRec = {
-          id: crypto.randomUUID(),
-          token_code: cleanToken,
-          token_hash: hashToken(cleanToken),
-          status: 'disponivel',
-          created_at: new Date().toISOString(),
-          created_by: ADMIN_EMAIL,
-        };
-        store.tokens.unshift(tokenRec);
-        saveStore(store);
-      } else {
-        return res.status(404).json({
-          valid: false,
-          error: 'Token inválido ou não gerado no painel de administração. Verifique o código digitado.',
-        });
+    let newStatus: SubscriptionStatus = 'active';
+    let statusDesc = 'Simulação de Pagamento aprovado na Kiwify.';
+
+    if (eventType === 'subscription_late' || eventType === 'subscription_past_due') {
+      newStatus = 'past_due';
+      statusDesc = 'Simulação de Pagamento atrasado na Kiwify.';
+    } else if (eventType === 'subscription_canceled') {
+      newStatus = 'canceled';
+      statusDesc = 'Simulação de Assinatura cancelada na Kiwify.';
+    } else if (eventType === 'subscription_renewed') {
+      newStatus = 'active';
+      statusDesc = 'Simulação de Renovação mensal Kiwify.';
+    }
+
+    let sub = store.subscriptions.find((s) => s.user_email.toLowerCase() === customerEmail);
+    const now = new Date();
+
+    if (sub) {
+      sub.status = newStatus;
+      sub.last_webhook_at = now.toISOString();
+      sub.updated_at = now.toISOString();
+      if (newStatus === 'active') {
+        sub.last_payment_date = now.toISOString();
+        sub.next_due_date = simulatedPayload.Subscription.next_payment_date;
       }
-    }
-
-    if (tokenRec.status === 'revogado') {
-      return res.status(400).json({
-        valid: false,
-        status: 'revogado',
-        error: 'Este token foi revogado pela administração e não pode ser utilizado.',
-      });
-    }
-
-    if (tokenRec.status === 'utilizado') {
-      return res.status(400).json({
-        valid: false,
-        status: 'utilizado',
-        error: `Este token já foi utilizado anteriormente pela congregação "${tokenRec.activated_by_igreja || 'outra igreja'}".`,
-      });
-    }
-
-    return res.json({
-      valid: true,
-      status: 'disponivel',
-      token_code: tokenRec.token_code,
-      message: 'Token válido e disponível para ativação vitalícia!',
-    });
-  });
-
-  // -------------------------------------------------------------
-  // 12. ATIVAÇÃO DE LICENÇA PERMANENTE POR TOKEN (OPÇÃO B & DENTRO DO SISTEMA)
-  // Operação Atômica no Servidor
-  // -------------------------------------------------------------
-  app.post('/api/license/activate', (req: Request, res: Response) => {
-    const { token, email, igreja_nome, responsavel_nome, cargo, user_id } = req.body || {};
-    if (!token) {
-      return res.status(400).json({ error: 'Informe o código do token de ativação.' });
-    }
-    if (!email || !igreja_nome) {
-      return res.status(400).json({ error: 'E-mail e nome da congregação são obrigatórios.' });
-    }
-
-    const cleanToken = normalizeToken(token);
-    const cleanEmail = String(email).trim().toLowerCase();
-    const cleanIgreja = String(igreja_nome).trim();
-    const incomingHash = hashToken(cleanToken);
-
-    const store = ensureDataStore();
-
-    // 1. Busca estrita do token no banco de tokens do admin
-    let tokenRec = store.tokens.find(
-      (t) => normalizeToken(t.token_code) === cleanToken || t.token_hash === incomingHash
-    );
-
-    const tokenRegex = /^MI-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
-    if (!tokenRec) {
-      if (tokenRegex.test(cleanToken)) {
-        tokenRec = {
-          id: crypto.randomUUID(),
-          token_code: cleanToken,
-          token_hash: incomingHash,
-          status: 'disponivel',
-          created_at: new Date().toISOString(),
-          created_by: ADMIN_EMAIL,
-        };
-        store.tokens.unshift(tokenRec);
-        saveStore(store);
-      } else {
-        return res.status(404).json({
-          error: 'Token inválido ou não gerado no painel de administração. Verifique o código digitado.',
-          code: 'TOKEN_NOT_FOUND',
-        });
-      }
-    }
-
-    if (tokenRec.status === 'revogado') {
-      return res.status(400).json({
-        error: 'Este token foi revogado pela administração e não pode ser utilizado.',
-        code: 'TOKEN_REVOKED',
-      });
-    }
-
-    if (tokenRec.status === 'utilizado') {
-      // Se já foi ativado por esta congregação/e-mail, confirma o status ativo sem erro
-      if (
-        tokenRec.activated_by_email?.toLowerCase() === cleanEmail ||
-        tokenRec.activated_by_igreja?.toLowerCase() === cleanIgreja.toLowerCase()
-      ) {
-        let existingChurch = store.churches.find(
-          (c) => c.email.toLowerCase() === cleanEmail || c.igreja_nome.toLowerCase() === cleanIgreja.toLowerCase()
-        );
-        if (existingChurch) {
-          existingChurch.status = 'active';
-          existingChurch.activated_at = existingChurch.activated_at || new Date().toISOString();
-          saveStore(store);
-          return res.json({
-            success: true,
-            status: 'active',
-            church: existingChurch,
-            message: 'Licença permanente vitalícia confirmada com sucesso!',
-          });
-        }
-      }
-
-      return res.status(400).json({
-        error: `Este token já foi utilizado anteriormente${
-          tokenRec.activated_by_igreja ? ` pela igreja "${tokenRec.activated_by_igreja}"` : ''
-        }. Cada token é de uso único.`,
-        code: 'TOKEN_ALREADY_USED',
-      });
-    }
-
-    // 2. Operação atômica: queima o token e vincula à igreja
-    const nowIso = new Date().toISOString();
-    tokenRec.status = 'utilizado';
-    tokenRec.activated_at = nowIso;
-    tokenRec.activated_by_email = cleanEmail;
-    tokenRec.activated_by_igreja = cleanIgreja;
-    tokenRec.activated_by_user_id = user_id ? String(user_id) : undefined;
-
-    // 3. Atualiza ou cria o registro da igreja como 'active' permanente
-    let church = store.churches.find(
-      (c) => c.email.toLowerCase() === cleanEmail || c.igreja_nome.toLowerCase() === cleanIgreja.toLowerCase()
-    );
-
-    if (church) {
-      church.status = 'active';
-      church.activated_at = nowIso;
-      church.token_code = cleanToken;
-      church.token_hash = incomingHash;
-      church.updated_at = nowIso;
-      if (user_id) church.user_id = String(user_id);
-    } else {
-      church = {
+      sub.events_history = sub.events_history || [];
+      sub.events_history.unshift({
         id: crypto.randomUUID(),
-        user_id: user_id ? String(user_id) : undefined,
-        igreja_nome: cleanIgreja,
-        email: cleanEmail,
-        responsavel_nome: responsavel_nome ? String(responsavel_nome).trim() : undefined,
-        cargo: cargo ? String(cargo).trim() : 'Pastor Titular',
-        status: 'active',
-        trial_start: nowIso,
-        trial_end: nowIso,
-        activated_at: nowIso,
-        token_code: cleanToken,
-        token_hash: incomingHash,
-        created_at: nowIso,
-        updated_at: nowIso,
-      };
-      store.churches.push(church);
+        event_type: `sim_${eventType}`,
+        description: `[SIMULAÇÃO ADMIN] ${statusDesc}`,
+        kiwify_order_id: orderId,
+        kiwify_subscription_id: kiwifySubId,
+        created_at: now.toISOString(),
+      });
     }
 
-    // 4. Registro de auditoria
-    store.logs.unshift({
+    const log: KiwifyWebhookLog = {
       id: crypto.randomUUID(),
-      tipo: 'ativacao_token',
-      descricao: `Licença permanente ativada com sucesso para "${cleanIgreja}" (${cleanEmail}) com o token ${cleanToken}.`,
-      user_email: cleanEmail,
-      igreja_nome: cleanIgreja,
-      created_at: nowIso,
-    });
+      event_type: `sim_${eventType}`,
+      order_id: orderId,
+      subscription_id: kiwifySubId,
+      customer_email: customerEmail,
+      status: 'processed',
+      message: `[SIMULAÇÃO] ${statusDesc} Novo status: ${newStatus}.`,
+      created_at: now.toISOString(),
+    };
 
+    store.webhook_logs.unshift(log);
     saveStore(store);
 
     return res.json({
       success: true,
-      status: 'active',
-      church,
-      message: 'Licença permanente ativada com sucesso! Seu acesso vitalício está liberado.',
+      message: `Simulação de evento "${eventType}" executada com sucesso!`,
+      status: newStatus,
+      email: customerEmail,
     });
   });
 
-  // -------------------------------------------------------------
-  // 13. CONSULTAR STATUS DA LICENÇA
-  // -------------------------------------------------------------
-  app.get('/api/license/status', (req: Request, res: Response) => {
-    const email = req.query.email ? String(req.query.email).trim().toLowerCase() : '';
-    const userId = req.query.userId ? String(req.query.userId).trim() : '';
-    const igreja = req.query.igreja ? String(req.query.igreja).trim().toLowerCase() : '';
+  // ----------------------------------------------------------------------
+  // 5. CONTROLE CENTRALIZADO DE ACESSO (MIDDLEWARE)
+  // ----------------------------------------------------------------------
+  // Verifica se a congregação possui assinatura ativa antes de liberar mutações
+  function requireSubscription(req: Request, res: Response, next: NextFunction) {
+    const userEmail = (req.headers['x-user-email'] as string || req.query.userEmail as string || '').toLowerCase().trim();
 
-    if (!email && !userId && !igreja) {
-      return res.status(400).json({ error: 'Parâmetro email, userId ou igreja obrigatório.' });
-    }
-
-    // Administrador Geral e pastor demo têm licença vitalícia permanente garantida
-    if (
-      email === ADMIN_EMAIL ||
-      email === 'pastor@maisigreja.com.br' ||
-      userId === 'admin-paulo-tavares' ||
-      userId === '87957dd5-b60c-4054-8a5f-2dd5d7400317'
-    ) {
-      return res.json({
-        exists: true,
-        status: 'active',
-        daysRemaining: 0,
-        igrejaNome: email === ADMIN_EMAIL ? 'Mais Igreja — Gestão Central' : 'Mais Igreja',
-        email: email || ADMIN_EMAIL,
-      });
+    if (!userEmail || userEmail === ADMIN_EMAIL || userEmail === 'pastor@maisigreja.com.br') {
+      return next();
     }
 
     const store = ensureDataStore();
-    if (refreshChurchStatuses(store)) {
-      saveStore(store);
-    }
+    const sub = store.subscriptions.find((s) => s.user_email.toLowerCase() === userEmail);
 
-    // 1. Verifica se há qualquer token utilizado na central para este email ou congregação
-    const usedToken = store.tokens.find(
-      (t) =>
-        t.status === 'utilizado' &&
-        ((email && t.activated_by_email?.toLowerCase() === email) ||
-         (igreja && t.activated_by_igreja?.toLowerCase() === igreja))
-    );
-
-    // 2. Busca nas igrejas cadastradas, PRIORIZANDO status 'active' permanente
-    let church = store.churches.find(
-      (c) =>
-        c.status === 'active' &&
-        ((email && c.email.toLowerCase() === email) ||
-         (userId && c.user_id === userId) ||
-         (igreja && c.igreja_nome.toLowerCase() === igreja))
-    );
-
-    // Se não encontrou ativo, busca qualquer correspondência
-    if (!church) {
-      church = store.churches.find(
-        (c) =>
-          (email && c.email.toLowerCase() === email) ||
-          (userId && c.user_id === userId) ||
-          (igreja && c.igreja_nome.toLowerCase() === igreja)
-      );
-    }
-
-    // 3. Se existe um token utilizado na central, a licença é INCONDICIONALMENTE ATIVA (VITALÍCIA)
-    if (usedToken) {
-      if (church) {
-        church.status = 'active';
-        church.token_code = usedToken.token_code;
-        church.token_hash = usedToken.token_hash;
-        church.activated_at = usedToken.activated_at || church.activated_at || new Date().toISOString();
-        if (userId) church.user_id = userId;
-        saveStore(store);
-      } else {
-        church = {
-          id: crypto.randomUUID(),
-          user_id: userId || undefined,
-          igreja_nome: usedToken.activated_by_igreja || (req.query.igreja as string) || 'Igreja',
-          email: email || usedToken.activated_by_email || 'pastor@igreja.com',
-          status: 'active',
-          trial_start: usedToken.created_at,
-          trial_end: usedToken.created_at,
-          activated_at: usedToken.activated_at || new Date().toISOString(),
-          token_code: usedToken.token_code,
-          token_hash: usedToken.token_hash,
-          created_at: usedToken.created_at,
-          updated_at: new Date().toISOString(),
-        };
-        store.churches.push(church);
-        saveStore(store);
-      }
-    }
-
-    // Se encontrou por e-mail mas o userId mudou/novo, atualiza o vínculo
-    if (church && userId && !church.user_id) {
-      church.user_id = userId;
-      church.updated_at = new Date().toISOString();
-      saveStore(store);
-    }
-
-    if (!church) {
-      return res.json({
-        exists: false,
-        status: 'not_found',
-        message: 'Nenhum registro de licença encontrado para este usuário.',
+    if (!sub || sub.status !== 'active') {
+      return res.status(403).json({
+        error: 'Acesso suspenso ou pendente de regularização de assinatura.',
+        status: sub ? sub.status : 'pending',
+        checkoutUrl: getEffectiveKiwifyConfig(store).checkoutUrl,
       });
     }
 
-    let daysRemaining = 0;
-    if (church.status === 'trial') {
-      const now = Date.now();
-      const end = new Date(church.trial_end).getTime();
-      daysRemaining = Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
-    }
+    return next();
+  }
 
-    return res.json({
-      exists: true,
-      status: church.status,
-      daysRemaining,
-      trialStart: church.trial_start,
-      trialEnd: church.trial_end,
-      activatedAt: church.activated_at,
-      igrejaNome: church.igreja_nome,
-      email: church.email,
-    });
-  });
+  // Protege rotas de dados sensíveis da API caso sejam chamadas diretamente
+  app.use('/api/membros', requireSubscription);
+  app.use('/api/celulas', requireSubscription);
+  app.use('/api/financeiro', requireSubscription);
+  app.use('/api/secretaria', requireSubscription);
 
-  // -------------------------------------------------------------
-  // 14. INICIALIZAÇÃO DE VITE EM DESENVOLVIMENTO OU ARQUIVOS ESTÁTICOS EM PRODUÇÃO
-  // -------------------------------------------------------------
+  // ----------------------------------------------------------------------
+  // 6. INTEGRAÇÃO VITE & FRONTEND SPA (PORTA 3000)
+  // ----------------------------------------------------------------------
   if (!IS_PROD) {
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
+      server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(ROOT_DIR, 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req: Request, res: Response) => {
+    app.get('*', (_req: Request, res: Response) => {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Servidor Mais Igreja rodando em http://0.0.0.0:${PORT}`);
+    console.log(`🚀 Servidor Mais Igreja rodando em http://localhost:${PORT}`);
+    console.log(`🔗 Webhook oficial Kiwify: http://localhost:${PORT}/api/webhooks/kiwify`);
   });
 }
 
 startServer().catch((err) => {
-  console.error('Falha ao iniciar servidor:', err);
+  console.error('Erro fatal ao iniciar servidor:', err);
   process.exit(1);
 });

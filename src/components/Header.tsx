@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, Church, Settings, ShieldCheck, Clock } from 'lucide-react';
+import { Menu, Church, Settings, ShieldCheck, CreditCard, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { UserSession, ChurchLicense } from '../types/database';
 import type { NavItemKey } from './Sidebar';
 
@@ -10,6 +10,7 @@ interface HeaderProps {
   license?: ChurchLicense | null;
   onOpenConfig?: () => void;
   onOpenAdmin?: () => void;
+  onOpenSubscriptionModal?: () => void;
   onRefresh?: () => Promise<void> | void;
 }
 
@@ -21,8 +22,61 @@ const titles: Record<NavItemKey, { title: string; subtitle: string }> = {
   financeiro: { title: 'Gestão Financeira', subtitle: 'Dízimos, ofertas, relatórios e saídas' },
 };
 
-export function Header({ currentPath, onOpenMobileMenu, user, license, onOpenConfig, onOpenAdmin }: HeaderProps) {
+export function Header({
+  currentPath,
+  onOpenMobileMenu,
+  user,
+  license,
+  onOpenConfig,
+  onOpenAdmin,
+  onOpenSubscriptionModal,
+}: HeaderProps) {
   const current = titles[currentPath] || titles.dashboard;
+
+  const renderSubscriptionBadge = () => {
+    if (!license) return null;
+
+    if (license.status === 'active') {
+      return (
+        <button
+          type="button"
+          onClick={onOpenSubscriptionModal}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold shadow-2xs hover:bg-emerald-100 transition-colors cursor-pointer"
+          title="Ver detalhes da assinatura mensal Kiwify"
+        >
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+          <span className="hidden sm:inline">Assinatura Ativa (Mensal)</span>
+          <span className="sm:hidden">Ativa</span>
+        </button>
+      );
+    }
+
+    if (license.status === 'past_due') {
+      return (
+        <button
+          type="button"
+          onClick={onOpenSubscriptionModal}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold shadow-2xs hover:bg-amber-100 transition-colors cursor-pointer animate-pulse"
+          title="Regularizar pagamento pendente na Kiwify"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+          <span>Assinatura Pendente</span>
+        </button>
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={onOpenSubscriptionModal}
+        className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold shadow-2xs hover:bg-blue-100 transition-colors cursor-pointer"
+        title="Contratar assinatura mensal"
+      >
+        <CreditCard className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+        <span>Assinatura Kiwify</span>
+      </button>
+    );
+  };
 
   return (
     <header className="sticky top-0 z-20 flex h-16 w-full items-center justify-between border-b border-gray-200 bg-white/95 px-4 sm:px-8 backdrop-blur-xs">
@@ -30,7 +84,7 @@ export function Header({ currentPath, onOpenMobileMenu, user, license, onOpenCon
       <div className="flex items-center gap-3">
         <button
           onClick={onOpenMobileMenu}
-          className="md:hidden flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100 transition-colors"
+          className="md:hidden flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
           aria-label="Abrir Menu Principal"
         >
           <Menu className="h-5 w-5" />
@@ -44,18 +98,7 @@ export function Header({ currentPath, onOpenMobileMenu, user, license, onOpenCon
 
       {/* Right zone: Church community, license badge, settings & profile */}
       <div className="flex items-center gap-2.5 sm:gap-3">
-        {license?.status === 'active' ? (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold shadow-2xs">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-            <span className="hidden sm:inline">Licença Vitalícia Ativa</span>
-            <span className="sm:hidden">Vitalícia</span>
-          </div>
-        ) : license?.status === 'trial' ? (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold shadow-2xs">
-            <Clock className="h-3.5 w-3.5 text-amber-600" />
-            <span>Teste: {license.daysRemaining}d</span>
-          </div>
-        ) : null}
+        {renderSubscriptionBadge()}
 
         <div className="hidden lg:flex items-center gap-2 text-xs text-gray-600 font-medium">
           <Church className="h-4 w-4 text-blue-600" />

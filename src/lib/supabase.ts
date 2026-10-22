@@ -399,7 +399,7 @@ export const db = {
     }
   },
 
-  // Retorna a licença do servidor como fonte única da verdade
+  // Retorna a assinatura da congregação no modelo SaaS Kiwify
   async getLicense(email?: string, userId?: string, igreja?: string): Promise<ChurchLicense> {
     const user = this.getUser();
     const queryEmail = (email || user?.email || '').trim().toLowerCase();
@@ -415,16 +415,16 @@ export const db = {
     ) {
       const activeLic: ChurchLicense = {
         status: 'active',
-        daysRemaining: 0,
         igrejaNome: queryIgreja || 'Mais Igreja',
         email: queryEmail || 'pastor@maisigreja.com.br',
+        nextDueDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
       };
       localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(activeLic));
       return activeLic;
     }
 
     if (!queryEmail && !queryUserId && !queryIgreja) {
-      return { status: 'trial_expired', daysRemaining: 0 };
+      return { status: 'pending' };
     }
 
     try {
@@ -433,31 +433,35 @@ export const db = {
       if (queryUserId) params.set('userId', queryUserId);
       if (queryIgreja) params.set('igreja', queryIgreja);
 
-      // Sempre consulta o servidor - o servidor é a autoridade máxima
-      const res = await fetch(`/api/license/status?${params.toString()}`);
-      
+      // Consulta o status oficial da assinatura gerenciada pela Kiwify
+      const res = await fetch(`/api/subscription/status?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         if (data && data.exists) {
           const lic: ChurchLicense = {
             status: data.status,
-            daysRemaining: data.daysRemaining ?? 0,
-            trialStart: data.trialStart,
-            trialEnd: data.trialEnd,
-            activatedAt: data.activatedAt,
+            subscriptionId: data.subscriptionId,
             igrejaNome: data.igrejaNome || queryIgreja,
             email: data.email || queryEmail,
+            nextDueDate: data.nextDueDate,
+            lastPaymentDate: data.lastPaymentDate,
+            kiwifySubscriptionId: data.kiwifySubscriptionId,
+            checkoutUrl: data.checkoutUrl,
           };
-          
           localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
           return lic;
+        } else if (data && !data.exists) {
+          return {
+            status: 'pending',
+            checkoutUrl: data.checkoutUrl,
+          };
         }
       }
     } catch (e) {
-      console.error('Falha ao consultar servidor de licenças:', e);
+      console.error('Falha ao consultar servidor de assinaturas Kiwify:', e);
     }
 
-    // Se temos licença em cache com status 'active', preserva em caso de oscilação de rede
+    // Preserva do cache local se status for active para evitar bloqueio por falha de rede transitória
     try {
       const local = localStorage.getItem(STORAGE_KEYS.LICENSE);
       if (local) {
@@ -468,103 +472,20 @@ export const db = {
       // continua
     }
 
-    // Se é a congregação amanhecer ou conta já ativada na central, garante status ativo
-    if (queryEmail === 'josieliotavares17@gmail.com' || queryIgreja.toLowerCase().includes('amanhecer')) {
-      const activeLic: ChurchLicense = {
-        status: 'active',
-        daysRemaining: 0,
-        igrejaNome: queryIgreja || 'IGREJA AMANHECER',
-        email: queryEmail || 'josieliotavares17@gmail.com',
-      };
-      localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(activeLic));
-      return activeLic;
-    }
-
-    return { status: 'trial_expired', daysRemaining: 0 };
+    return { status: 'pending' };
   },
 
-  // Inicia o teste gratuito de 14 dias (Opção A)
-  async startTrial(data: {
-    email: string;
-    igreja_nome: string;
-    responsavel_nome?: string;
-    cargo?: string;
-    user_id?: string;
-  }): Promise<{ success: boolean; status: LicenseStatus; daysRemaining: number; message: string }> {
-    const res = await fetch('/api/license/start-trial', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      throw new Error(json.error || 'Erro ao iniciar período de teste.');
-    }
-    const lic: ChurchLicense = {
-      status: json.status,
-      daysRemaining: json.daysRemaining ?? 14,
-      trialStart: json.trial_start,
-      trialEnd: json.trial_end,
-      igrejaNome: data.igreja_nome,
-      email: data.email,
-    };
-    localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
-    return json;
-  },
-
-  // Valida um token em tempo real antes de ativar
-  async validateToken(token: string): Promise<{ valid: boolean; message: string; error?: string; status?: string }> {
-    const cleanToken = (token || '').replace(/\s+/g, '').toUpperCase();
-    if (!cleanToken) return { valid: false, message: 'Digite o código do token.' };
-
+  // Consulta a configuração do checkout da Kiwify
+  async getSubscriptionConfig(): Promise<{ checkoutUrl: string; productId: string; isConfigured: boolean }> {
     try {
-      const res = await fetch('/api/license/validate-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: cleanToken }),
-      });
-      const data = await res.json();
-      if (res.ok && data.valid) {
-        return { valid: true, message: data.message || 'Token válido para ativação permanente.', status: data.status };
+      const res = await fetch('/api/subscription/config');
+      if (res.ok) {
+        return await res.json();
       }
-      return { valid: false, message: data.error || 'Token inválido ou não encontrado.', error: data.error, status: data.status };
-    } catch (err: any) {
-      return { valid: false, message: 'Erro ao validar token no servidor.' };
+    } catch (e) {
+      console.error('Erro ao buscar configuração Kiwify:', e);
     }
-  },
-
-  // Ativa a licença permanente vitalícia através do Token (Opção B)
-  async activateToken(data: {
-    token: string;
-    email: string;
-    igreja_nome: string;
-    responsavel_nome?: string;
-    cargo?: string;
-    user_id?: string;
-  }): Promise<{ success: boolean; status: LicenseStatus; message: string }> {
-    const cleanToken = (data.token || '').replace(/\s+/g, '').toUpperCase();
-    const payload = { ...data, token: cleanToken };
-
-    const res = await fetch('/api/license/activate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const json = await res.json();
-    if (res.ok && json.success) {
-      const lic: ChurchLicense = {
-        status: 'active',
-        daysRemaining: 0,
-        activatedAt: new Date().toISOString(),
-        tokenCode: cleanToken,
-        igrejaNome: data.igreja_nome,
-        email: data.email,
-      };
-      localStorage.setItem(STORAGE_KEYS.LICENSE, JSON.stringify(lic));
-      return json;
-    } else {
-      throw new Error(json.error || 'Token inválido ou não gerado no painel de administração.');
-    }
+    return { checkoutUrl: '', productId: '', isConfigured: false };
   },
 
   // Retorna APENAS as células reais do Supabase
